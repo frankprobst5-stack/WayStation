@@ -125,6 +125,7 @@ pub fn run() {
             db::get_markers,
             db::create_marker,
             dispatch::dispatch_marker,
+            db::get_delivery_attempts,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

@@ -807,6 +807,75 @@ pub fn insert_received_marker(
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DeliveryAttempt {
+    pub id: i64,
+    pub object_type: String,
+    pub object_uuid: String,
+    pub transport: String,
+    pub attempted_at: String,
+    pub result: String,
+    pub detail: Option<String>,
+}
+
+fn delivery_attempt_from_row(row: &rusqlite::Row) -> rusqlite::Result<DeliveryAttempt> {
+    Ok(DeliveryAttempt {
+        id: row.get(0)?,
+        object_type: row.get(1)?,
+        object_uuid: row.get(2)?,
+        transport: row.get(3)?,
+        attempted_at: row.get(4)?,
+        result: row.get(5)?,
+        detail: row.get(6)?,
+    })
+}
+
+/// Called by the dispatcher around every `Transport::send` call, success
+/// or failure -- the whole point is a real history, not just the latest
+/// outcome (see the v31 migration comment). `object_uuid` is the v30
+/// header's stable identity, not the local integer id, since this
+/// record needs to keep meaning the same thing once more than one
+/// station's database exists.
+pub fn record_delivery_attempt(
+    conn: &Connection,
+    object_type: &str,
+    object_uuid: &str,
+    transport: &str,
+    result: Result<(), &str>,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    let (result_str, detail) = match result {
+        Ok(()) => ("success", None),
+        Err(e) => ("failure", Some(e)),
+    };
+    conn.execute(
+        "INSERT INTO delivery_attempts (object_type, object_uuid, transport, attempted_at, result, detail)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![object_type, object_uuid, transport, now, result_str, detail],
+    )
+    .expect("failed to record delivery attempt");
+}
+
+/// Full attempt history for one object, oldest first -- what an
+/// operator actually needs to answer "what happened to this message":
+/// every transport that was tried, in order, and why each one failed
+/// or succeeded.
+pub fn delivery_attempts_for(conn: &Connection, object_uuid: &str) -> Vec<DeliveryAttempt> {
+    let mut stmt = conn
+        .prepare("SELECT id, object_type, object_uuid, transport, attempted_at, result, detail FROM delivery_attempts WHERE object_uuid = ?1 ORDER BY id ASC")
+        .expect("failed to prepare delivery-attempts query");
+    stmt.query_map(params![object_uuid], delivery_attempt_from_row)
+        .expect("failed to query delivery attempts")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_delivery_attempts(db: State<Db>, object_uuid: String) -> Vec<DeliveryAttempt> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    delivery_attempts_for(&conn, &object_uuid)
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Resource {
     pub id: i64,
     pub label: String,
@@ -2325,6 +2394,34 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE map_markers ADD COLUMN expires_at TEXT;
     ALTER TABLE map_markers ADD COLUMN trust_state TEXT NOT NULL DEFAULT 'local';
     "#,
+    // v31: durable delivery-attempt history, decided 2026-09-01 as the
+    // deliberate next step after v30's object header -- and sequenced
+    // this way on purpose, not arbitrarily: `dispatch_status`/
+    // `dispatched_via` on messages/map_markers only ever recorded the
+    // *latest* outcome, never the road there. That's a real gap against
+    // the roadmap's own north-star language -- "the failed attempt is
+    // preserved... it does not silently invent delivery or endlessly
+    // retransmit" only means something if there's an actual history to
+    // point at, not just a single current-state field. It's also a
+    // precondition for the two-instance sync proof that's next on the
+    // roadmap: syncing "what happened to this message" between two
+    // stations needs real attempt history to exist first, not just a
+    // snapshot. `object_uuid` (not the local integer id) is the
+    // reference -- the whole reason v30 introduced a stable identity was
+    // so records like this one keep meaning the same thing once more
+    // than one station's database exists.
+    r#"
+    CREATE TABLE delivery_attempts (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        object_type  TEXT NOT NULL CHECK (object_type IN ('message', 'marker')),
+        object_uuid  TEXT NOT NULL,
+        transport    TEXT NOT NULL,
+        attempted_at TEXT NOT NULL,
+        result       TEXT NOT NULL CHECK (result IN ('success', 'failure')),
+        detail       TEXT
+    );
+    CREATE INDEX idx_delivery_attempts_object ON delivery_attempts(object_uuid, attempted_at);
+    "#,
 ];
 
 pub fn data_dir() -> PathBuf {
@@ -2584,5 +2681,39 @@ mod tests {
         let count: i64 = backup.query_row("SELECT COUNT(*) FROM qso_log", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1);
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn delivery_attempts_preserve_the_full_history_not_just_the_latest_outcome() {
+        // The entire point of v31: a message tried on two transports (one
+        // failed, one succeeded) must leave both attempts queryable, in
+        // order -- not just the final "dispatched via winlink" state
+        // that dispatch_status/dispatched_via alone would show.
+        let conn = fresh_db();
+        let uuid = "test-uuid-1";
+        record_delivery_attempt(&conn, "message", uuid, "mesh", Err("mesh not connected"));
+        record_delivery_attempt(&conn, "message", uuid, "winlink", Ok(()));
+
+        let attempts = delivery_attempts_for(&conn, uuid);
+        assert_eq!(attempts.len(), 2);
+
+        assert_eq!(attempts[0].transport, "mesh");
+        assert_eq!(attempts[0].result, "failure");
+        assert_eq!(attempts[0].detail.as_deref(), Some("mesh not connected"));
+
+        assert_eq!(attempts[1].transport, "winlink");
+        assert_eq!(attempts[1].result, "success");
+        assert_eq!(attempts[1].detail, None);
+    }
+
+    #[test]
+    fn delivery_attempts_are_scoped_to_their_own_object() {
+        let conn = fresh_db();
+        record_delivery_attempt(&conn, "message", "uuid-a", "mesh", Ok(()));
+        record_delivery_attempt(&conn, "marker", "uuid-b", "js8call", Err("no route"));
+
+        assert_eq!(delivery_attempts_for(&conn, "uuid-a").len(), 1);
+        assert_eq!(delivery_attempts_for(&conn, "uuid-b").len(), 1);
+        assert_eq!(delivery_attempts_for(&conn, "uuid-nonexistent").len(), 0);
     }
 }

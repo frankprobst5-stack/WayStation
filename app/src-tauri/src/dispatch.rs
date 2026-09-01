@@ -25,6 +25,37 @@ use crate::db::{Db, MapMarker, Message};
 use crate::transport::{self, Destination, OutboundEnvelope, Payload};
 use tauri::{AppHandle, Manager};
 
+/// Tries every transport in priority order, recording a `delivery_attempts`
+/// row for each one tried -- success or failure, not just the winner.
+/// That's the actual point of v31: `dispatch_status`/`dispatched_via` on
+/// the object itself only ever showed the latest outcome; an operator
+/// asking "what happened to this message" deserves the real sequence
+/// (mesh tried and failed, then Winlink succeeded), not just the last
+/// line of it. Shared between messages and markers rather than
+/// duplicated, same reasoning as collapsing the two dispatch loops
+/// earlier today. Returns which transport it went out on, or None if
+/// nothing could reach it right now -- callers leave the object queued
+/// rather than treating that as an error, since "no route yet" is the
+/// normal state until a transport comes up, not a failure.
+fn dispatch_with_logging(app: &AppHandle, object_type: &str, object_uuid: &str, envelope: &OutboundEnvelope) -> Option<String> {
+    for t in transport::transports() {
+        let result = t.send(app, envelope);
+        {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().expect("db mutex poisoned");
+            let outcome: Result<(), &str> = match &result {
+                Ok(()) => Ok(()),
+                Err(e) => Err(e.as_str()),
+            };
+            crate::db::record_delivery_attempt(&conn, object_type, object_uuid, t.id(), outcome);
+        }
+        if result.is_ok() {
+            return Some(t.id().to_string());
+        }
+    }
+    None
+}
+
 /// Tries to actually send a message, in priority order. Returns which
 /// transport it went out on, or None if nothing could reach it right
 /// now — callers leave the message queued rather than treating that as
@@ -45,10 +76,7 @@ fn try_dispatch(app: &AppHandle, m: &Message) -> Option<String> {
         },
         want_ack: true,
     };
-    transport::transports()
-        .into_iter()
-        .find(|t| t.send(app, &envelope).is_ok())
-        .map(|t| t.id().to_string())
+    dispatch_with_logging(app, "message", &m.uuid, &envelope)
 }
 
 #[tauri::command]
@@ -152,10 +180,7 @@ fn try_dispatch_marker(app: &AppHandle, m: &MapMarker) -> Option<String> {
         payload: Payload::Marker(&wire),
         want_ack: m.to_station.is_some(),
     };
-    transport::transports()
-        .into_iter()
-        .find(|t| t.send(app, &envelope).is_ok())
-        .map(|t| t.id().to_string())
+    dispatch_with_logging(app, "marker", &m.uuid, &envelope)
 }
 
 #[tauri::command]
