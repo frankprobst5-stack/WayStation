@@ -82,7 +82,14 @@ function TabContent({ id }: { id: string }) {
           </p>
           <ol className="manual-steps">
             <li>Turn on the computer. If it's on battery, plug it in if you can — this may run for a long time.</li>
-            <li>Open WayStation. It should already be set up to start on its own, or there will be an icon to click.</li>
+            <li>
+              Open Citadel (the main dashboard) in a web browser, and click the <strong>Communications Hub</strong>{" "}
+              tile. This opens WayStation directly — you don't need to find a separate icon for it. The very first
+              time you do this, the browser may ask "Open this link with WayStation?" — say yes, and check "remember
+              my choice" if it's offered so it doesn't ask again. If Citadel itself isn't available, WayStation can
+              also be opened on its own the normal way for this computer (an icon or shortcut) — ask whoever set this
+              machine up where that is, and write it down here for next time.
+            </li>
             <li>
               You should see a dark screen with <strong>Waystation</strong> in gold at the top-left, and a column of
               links below it: Dashboard, EmComm, Messaging, Activity, Reference, Tools, Settings, User Manual. If you
