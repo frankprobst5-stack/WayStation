@@ -1,0 +1,2717 @@
+/* ==========================================================================
+   Theme: "command center" — deep charcoal base, amber/Heathkit-green
+   accents. A deliberate identity, not a system-preference dark mode — every
+   reference dashboard hams responded to (see DESIGN.md) was this look, not
+   a toggle. Single theme, not light/dark, on purpose.
+
+   Status-tier colors (green=good/quiet, amber=caution/moderate,
+   red=danger/severe) are semantic and reused everywhere — alerts, net
+   roster, message precedence, space weather, freshness — for a
+   consistent "read the color, not the text" command-center feel.
+   ========================================================================== */
+
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+
+  /* Surfaces */
+  --bg-app: #0a0c09;
+  --bg-panel: #14170f;
+  --bg-input: #10120c;
+
+  /* Text */
+  --text-primary: #e6e4d6;
+  --text-muted: #8f9280;
+
+  /* Borders — warm amber tint at low alpha, not neutral gray */
+  --border: rgba(255, 191, 92, 0.16);
+  --border-strong: rgba(255, 191, 92, 0.32);
+
+  /* Accent palette */
+  --amber: #ffb000;
+  --amber-dim: #b8860b;
+  --green: #39d97a;
+  --gold: #e8b93f;
+  --red: #ff4d4f;
+  --purple: #c77dff;
+  --blue: #5aa9e6;
+  --gray: #8a8d80;
+
+  /* Translucent amber-tinted overlays, layered on top of --bg-panel for
+     rows/chips/buttons/tiles — same technique as before, warm tint instead
+     of neutral gray. */
+  --surface-1: rgba(255, 191, 92, 0.05);
+  --surface-2: rgba(255, 191, 92, 0.08);
+  --surface-3: rgba(255, 191, 92, 0.11);
+  --surface-4: rgba(255, 191, 92, 0.14);
+  --surface-5: rgba(255, 191, 92, 0.18);
+
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+@media (max-width: 800px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+  }
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-brand h1 {
+  font-size: 1.1rem;
+  margin: 0;
+  letter-spacing: 0.02em;
+  color: var(--amber);
+  text-shadow: 0 0 8px rgba(255, 176, 0, 0.25);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem 0.6rem;
+  flex: 1;
+}
+
+.sidebar-link {
+  text-align: left;
+  padding: 0.55em 0.8em;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sidebar-link:hover {
+  opacity: 0.9;
+  background: var(--surface-1);
+}
+
+.sidebar-link.sidebar-link-active {
+  opacity: 1;
+  border-left-color: var(--amber);
+  color: var(--amber);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.connectivity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.3em 0.7em;
+  border-radius: 999px;
+  background: var(--surface-4);
+  border: 1px solid var(--border);
+  cursor: default;
+  white-space: pre-line;
+}
+
+.shell-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shell-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.first-run-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-left: 3px solid var(--amber);
+  background: var(--surface-2);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.first-run-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex: none;
+}
+
+.first-run-banner-actions button {
+  padding: 0.35em 0.9em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.first-run-banner-dismiss {
+  opacity: 0.7;
+  background: none !important;
+}
+
+.time-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 2rem;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.time-bar strong {
+  font-size: 0.95rem;
+  color: var(--green);
+  text-shadow: 0 0 6px rgba(57, 217, 122, 0.35);
+}
+
+.panel-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  padding: 1.25rem;
+  align-content: start;
+}
+
+/* Panel size comes from the panel's own PanelDefinition (see
+   panels/types.ts), surfaced as data attributes by App.tsx. This replaced
+   a growing list of `.panel:has(.panel-x)` exemptions — six of them by the
+   end, each added the first time a panel visibly broke. Six exemptions to
+   one rule meant the rule was wrong: panels aren't uniform boxes, so they
+   declare their shape instead of CSS guessing it from a class name. */
+.panel[data-width="wide"] {
+  grid-column: span 2;
+}
+
+.panel[data-width="full"] {
+  grid-column: 1 / -1;
+}
+
+/* A "wide" panel must not spill out of a single-column layout on a narrow
+   window — span 2 of 1 column would overflow the grid. */
+@media (max-width: 640px) {
+  .panel[data-width="wide"] {
+    grid-column: 1 / -1;
+  }
+}
+
+.panel[data-height="tall"] {
+  max-height: 640px;
+}
+
+.panel[data-height="natural"] {
+  max-height: none;
+}
+
+.panel-world-map {
+  width: 100%;
+  position: relative;
+}
+
+.map-tooltip {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.panel-world-map canvas {
+  width: 100%;
+  display: block;
+  border-radius: 6px;
+}
+
+.panel-tactical-map {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tactical-map-canvas {
+  width: 100%;
+  height: 480px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.tactical-map-error {
+  order: -1;
+}
+
+.tactical-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+
+.tactical-map-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.tactical-map-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.tactical-map-source {
+  margin-left: auto;
+  opacity: 0.6;
+  font-size: 0.7rem;
+}
+
+.tactical-map-toolbar {
+  display: flex;
+}
+
+.tactical-map-pin-toggle {
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.tactical-map-pin-toggle.active {
+  background: var(--accent, #c9a227);
+  color: #1a1a1a;
+  border-color: transparent;
+}
+
+.marker-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.marker-form > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.marker-form input,
+.marker-form select {
+  width: 100%;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.marker-form button {
+  flex: 0 0 auto;
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  background: var(--bg-panel);
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.panel-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--amber-dim);
+  margin: 0 0 0.75rem 0;
+}
+
+
+.panel-station-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.panel-station-identity label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.panel-station-identity input {
+  font-size: 0.95rem;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+}
+
+.panel-station-identity input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.panel-station-identity .field-error {
+  color: var(--red);
+  font-size: 0.7rem;
+}
+
+.panel-station-identity .field-hint {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.panel-station-identity button {
+  align-self: flex-start;
+  padding: 0.4em 1.2em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.panel-station-identity button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.freshness {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+.freshness-fresh {
+  color: var(--green);
+}
+
+.freshness-aging {
+  color: var(--amber);
+}
+
+.freshness-stale {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.freshness-unknown {
+  font-style: italic;
+  opacity: 0.5;
+}
+
+.panel-alerts-empty {
+  opacity: 0.6;
+  font-size: 0.85rem;
+}
+
+.panel-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+.alert-card {
+  border-left: 4px solid var(--gray);
+  padding: 0.5rem 0.7rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.85rem;
+}
+
+.alert-card.severity-extreme {
+  border-left-color: var(--purple);
+}
+
+.alert-card.severity-severe {
+  border-left-color: var(--red);
+}
+
+.alert-card.severity-moderate {
+  border-left-color: var(--amber);
+}
+
+.alert-card.severity-minor {
+  border-left-color: var(--gold);
+}
+
+.alert-card.severity-unknown {
+  border-left-color: var(--gray);
+}
+
+.alert-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.alert-severity {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.alert-headline {
+  margin-top: 0.3rem;
+}
+
+.alert-area {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-top: 0.2rem;
+}
+
+.alert-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+/* Net control */
+
+.panel-net-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* Situation Summary / incident info */
+
+.panel-incident-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.incident-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.incident-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: var(--surface-1);
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+  flex: 1;
+  min-width: 220px;
+}
+
+.incident-box-title {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--amber-dim);
+  font-weight: 700;
+}
+
+.incident-field {
+  display: flex;
+  flex-direction: row;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.incident-field-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+
+.incident-field-value {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.incident-status {
+  color: var(--green);
+}
+
+.incident-edit-button {
+  font-size: 0.75rem;
+  padding: 0.3em 0.8em;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+}
+
+.incident-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.incident-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.incident-form input {
+  font-size: 0.9rem;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+}
+
+.incident-form-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.incident-form-actions button {
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.net-checkin-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.net-grid-input {
+  flex: 1 1 160px !important;
+}
+
+.net-checkin-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+}
+
+.net-callsign-input {
+  flex: 0.7 !important;
+}
+
+.net-roster-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.net-roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.net-roster-table th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.net-roster-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.net-roster-table tr.status-checked_out {
+  opacity: 0.55;
+}
+
+.net-callsign {
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.net-status-pill {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1em 0.5em;
+  border-radius: 999px;
+  background: var(--surface-4);
+}
+
+.net-status-pill.status-checked_in {
+  background: var(--green);
+  color: var(--bg-app);
+}
+
+.net-roster-actions {
+  display: flex;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.net-roster-actions button,
+.net-clear-button {
+  font-size: 0.7rem;
+  padding: 0.25em 0.6em;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: inherit;
+  cursor: pointer;
+}
+
+.net-clear-button {
+  margin-top: 0.5rem;
+}
+
+/* Messages / ICS-213 / ICS-309 */
+
+.panel-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.ics213-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ics213-row {
+  display: flex;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.ics213-row > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.ics213-form input,
+.ics213-form select,
+.ics213-form textarea {
+  width: 100%;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.ics213-form textarea {
+  resize: vertical;
+}
+
+.ics213-form button {
+  align-self: flex-start;
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.ics309-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.ics309-column-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 500px) {
+  .ics309-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ics309-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+.message-row {
+  border-left: 4px solid var(--gray);
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+
+.message-row.precedence-routine {
+  border-left-color: var(--blue);
+}
+.message-row.precedence-priority {
+  border-left-color: var(--amber);
+}
+.message-row.precedence-immediate {
+  border-left-color: var(--red);
+}
+.message-row.precedence-emergency {
+  border-left-color: var(--purple);
+}
+
+.message-header {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+.message-subject {
+  font-weight: 600;
+  margin-top: 0.2rem;
+}
+
+.message-text {
+  margin-top: 0.2rem;
+  white-space: pre-wrap;
+}
+
+.message-dispatch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+}
+
+.message-dispatch-status.dispatched {
+  color: var(--green);
+}
+
+.message-dispatch-status.queued {
+  opacity: 0.7;
+}
+
+.message-dispatch button {
+  font-size: 0.65rem;
+  padding: 0.2em 0.6em;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: inherit;
+  cursor: pointer;
+}
+
+.ics309-export {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ics309-export button {
+  align-self: flex-start;
+  font-size: 0.75rem;
+  padding: 0.3em 0.8em;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: inherit;
+  cursor: pointer;
+}
+
+.ics309-export textarea {
+  font-family: monospace;
+  font-size: 0.7rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+}
+
+/* Resources */
+
+.panel-resources {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.resource-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.resource-form > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.resource-form input {
+  width: 100%;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.resource-form button {
+  flex: 0 0 auto;
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.resource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+.resource-row {
+  border-left: 4px solid var(--blue);
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+
+.required-software-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.required-software-row {
+  border-left: 4px solid var(--green);
+  padding: 0.5rem 0.7rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.85rem;
+}
+
+.required-software-row.missing {
+  border-left-color: var(--amber-dim);
+}
+
+.required-software-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.required-software-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.required-software-head button {
+  padding: 0.3em 0.8em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.required-software-note {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.resource-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.resource-header span:last-child {
+  font-weight: 400;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.resource-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+
+.resource-chip {
+  background: var(--surface-5);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+}
+
+.resource-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.resource-actions button {
+  font-size: 0.7rem;
+  padding: 0.25em 0.6em;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Readiness */
+
+.panel-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.panel-readiness > button {
+  align-self: flex-start;
+  padding: 0.5em 1.2rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.panel-readiness > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.readiness-report {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.readiness-warn {
+  color: var(--amber);
+}
+
+.readiness-checked-at {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-top: 0.2rem;
+}
+
+/* Winlink */
+
+.panel-winlink {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* Shares the mesh-topbar visual language (status dot, chip row, action
+   button) so Winlink/JS8Call read as the same family of message panel. */
+.winlink-status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+.winlink-warning {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-left: 3px solid var(--amber);
+  border-radius: 0;
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.winlink-status-line button {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.25em 0.6em;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: inherit;
+  cursor: pointer;
+}
+
+.winlink-status-line button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.winlink-inbox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+.winlink-message-row {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.5rem;
+  border-left: 4px solid var(--amber);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.winlink-from {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Space weather */
+
+.panel-space-weather {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* auto-fit rather than a fixed 4 columns: at a third of page width four
+   equal tiles are ~60px each, narrower than the word "BLACKOUT", so the
+   R/S/G labels were being silently truncated by the overflow: hidden
+   below. That rule correctly stops the grid from bursting its panel, but
+   clipping a label is not the right way to fit -- reflowing to fewer,
+   wider columns is. */
+.sw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  gap: 0.4rem;
+}
+
+.sw-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  background: var(--surface-3);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sw-label {
+  font-size: 0.65rem;
+  opacity: 0.65;
+  text-transform: uppercase;
+  /* Backstop for the narrowest layouts: break inside a long word rather
+     than let overflow: hidden shear it off mid-letter. */
+  overflow-wrap: anywhere;
+}
+
+.sw-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sw-tile.sw-quiet .sw-value {
+  color: var(--green);
+}
+
+.sw-tile.sw-unsettled .sw-value {
+  color: var(--amber);
+}
+
+.sw-tile.sw-storm .sw-value {
+  color: var(--red);
+}
+
+.sw-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+.band-condition-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+}
+
+.band-condition-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.band-condition-header {
+  font-size: 0.65rem;
+  opacity: 0.65;
+  text-transform: uppercase;
+}
+
+.band-condition-cell {
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  text-align: center;
+  background: var(--surface-3);
+}
+
+.band-condition-cell.sw-quiet {
+  color: var(--green);
+}
+
+.band-condition-cell.sw-unsettled {
+  color: var(--amber);
+}
+
+.band-condition-cell.sw-storm {
+  color: var(--red);
+}
+
+/* Spectrum reference */
+
+.panel-reference {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.panel-reference h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--amber-dim);
+  margin: 0 0 0.35rem 0;
+}
+
+.ref-line {
+  font-size: 0.85rem;
+  margin-bottom: 0.15rem;
+}
+
+.nato-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 0.3rem;
+}
+
+.nato-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.nato-letter {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.nato-word {
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+.nato-morse {
+  font-size: 0.75rem;
+  font-family: monospace;
+  opacity: 0.85;
+}
+
+/* Channel directory */
+
+.channel-form {
+  flex-wrap: wrap;
+}
+
+.channel-notes-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+}
+
+/* Bearing & distance */
+
+.panel-bearing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.bearing-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.bearing-from {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.bearing-form input {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+}
+
+.bearing-form button {
+  flex-shrink: 0;
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.bearing-result {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+/* Band plan */
+
+.panel-bandplan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+.bandplan-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  background: var(--surface-1);
+  font-size: 0.8rem;
+}
+
+.bandplan-name {
+  font-weight: 700;
+  min-width: 3.5rem;
+  color: var(--amber);
+}
+
+.bandplan-range {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+
+.bandplan-notes {
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
+
+.bandplan-disclaimer {
+  font-size: 0.7rem;
+  opacity: 0.55;
+  margin-top: 0.4rem;
+  font-style: italic;
+}
+
+/* Tools (antenna/dB/SWR/RF safety calculators) */
+
+.panel-calc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.calc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.calc-row > * {
+  flex: 1;
+  min-width: 100px;
+}
+
+.panel-calc input {
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: inherit;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+/* Every <select> in the app, not just this tab — native selects don't
+   reliably inherit color/background from :root the way other form
+   elements do (bit us once already on the ICS-213 precedence dropdown). */
+select {
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.panel-repeaters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.panel-repeaters .resource-list {
+  max-height: 320px;
+}
+
+/* Status lights */
+
+.status-lights {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 0.4rem 1.25rem 0.6rem;
+}
+
+.status-light-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #333;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
+.status-dot.status-green {
+  background: var(--green);
+  box-shadow: 0 0 6px 1px var(--green);
+}
+
+.status-dot.status-amber {
+  background: var(--amber);
+  box-shadow: 0 0 6px 1px var(--amber);
+}
+
+.status-dot.status-red {
+  background: var(--red);
+  box-shadow: 0 0 6px 1px var(--red);
+}
+
+.status-dot.status-off {
+  background: #2a2c26;
+  box-shadow: none;
+}
+
+/* Gauge dials */
+
+.gauge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem 0.3rem;
+  margin-bottom: 0.7rem;
+}
+
+.gauge-dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.gauge-svg {
+  width: 100%;
+  max-width: 90px;
+  overflow: visible;
+}
+
+.gauge-track {
+  fill: none;
+  stroke: var(--surface-4);
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.gauge-fill {
+  fill: none;
+  stroke: var(--amber);
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+.gauge-dial.gauge-quiet .gauge-fill {
+  stroke: var(--green);
+}
+
+.gauge-dial.gauge-unsettled .gauge-fill {
+  stroke: var(--amber);
+}
+
+.gauge-dial.gauge-storm .gauge-fill {
+  stroke: var(--red);
+}
+
+.gauge-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: -0.9rem;
+}
+
+.gauge-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-top: 0.1rem;
+}
+
+/* User manual */
+
+.panel-user-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.panel-user-manual p {
+  margin: 0 0 0.6rem 0;
+  opacity: 0.9;
+}
+
+.panel-user-manual dl {
+  margin: 0;
+}
+
+.panel-user-manual dt {
+  font-weight: 600;
+  color: var(--gold);
+  margin-top: 0.5rem;
+}
+
+.panel-user-manual dd {
+  margin: 0.1rem 0 0 0;
+  opacity: 0.85;
+}
+
+.panel-user-manual code {
+  background: var(--surface-2);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.8em;
+}
+
+/* Tabbed manual -- five severity/purpose tiers, reusing the app's existing
+   green/amber/red status-tier colors plus purple (build/repair) and blue
+   (deep reference), so a row's importance reads from its color the same
+   way alerts and freshness already do elsewhere. */
+
+.manual-tab-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.manual-tab-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border-left: 4px solid var(--tier-color);
+  background: var(--surface-1);
+}
+
+.manual-tier-red { --tier-color: var(--red); }
+.manual-tier-amber { --tier-color: var(--amber); }
+.manual-tier-green { --tier-color: var(--green); }
+.manual-tier-purple { --tier-color: var(--purple); }
+.manual-tier-blue { --tier-color: var(--blue); }
+
+.manual-tier-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tier-color);
+  font-weight: 700;
+  flex: none;
+  min-width: 150px;
+}
+
+.manual-tab-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.manual-tab-button {
+  padding: 0.3em 0.7em;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  opacity: 0.75;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.manual-tab-button:hover {
+  opacity: 1;
+}
+
+.manual-tab-button.active {
+  opacity: 1;
+  background: var(--tier-color);
+  color: var(--bg-app);
+  font-weight: 700;
+  border-color: var(--tier-color);
+}
+
+.manual-tab-content {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+
+.manual-lede {
+  font-weight: 600;
+  opacity: 1 !important;
+}
+
+.manual-warn {
+  border-left: 3px solid var(--amber);
+  background: var(--surface-2);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.manual-steps,
+.manual-symptom-list {
+  margin: 0 0 0.6rem 0;
+}
+
+.manual-steps li {
+  margin-bottom: 0.5rem;
+}
+
+.manual-symptom-list dt {
+  color: var(--red);
+}
+
+.manual-fillin-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.manual-fillin {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.manual-fillin-label {
+  font-weight: 600;
+  color: var(--amber-dim);
+  flex: none;
+}
+
+.manual-fillin-blank {
+  border-bottom: 1px dashed var(--border-strong);
+  flex: 1;
+  min-width: 120px;
+  opacity: 0.5;
+}
+
+.manual-stub {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.manual-stub-note {
+  font-style: normal;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+/* QSO log */
+
+.qso-dupe-warning {
+  font-size: 0.8rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  border-left: 4px solid var(--amber);
+  background: var(--surface-2);
+  color: var(--amber);
+}
+
+/* Mesh (Meshtastic) — also the template pattern for other message-type
+   panels (JS8Call, Winlink): topbar status strip, a resizable-feeling
+   three-column shell (context rail / thread / detail rail), thread
+   bubbles, and a fixed compose bar. */
+
+.panel-mesh {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.mesh-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.mesh-topbar-label {
+  font-weight: 600;
+  margin-right: 0.2rem;
+}
+
+.mesh-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+}
+
+.mesh-dot.up {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.mesh-dot.degraded {
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+}
+
+.mesh-reconnect {
+  margin-left: auto;
+}
+
+.mesh-shell {
+  display: grid;
+  /* Rails shrink under pressure instead of the whole grid bailing out to a
+     single stacked column -- 1000px was too eager a collapse point and
+     folded the 3-column layout on completely ordinary ~950px windows,
+     with only the app-level sidebar (a separate grid, unaffected) still
+     showing side-by-side. */
+  grid-template-columns: minmax(190px, 220px) minmax(320px, 1fr) minmax(170px, 200px);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .mesh-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mesh-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.mesh-rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mesh-node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.mesh-node-card {
+  border-left: 4px solid var(--amber);
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mesh-node-card.active {
+  background: var(--surface-4);
+  border-left-color: var(--green);
+}
+
+.mesh-signal {
+  letter-spacing: 1px;
+  color: var(--amber);
+}
+
+.mesh-stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+.mesh-stat-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 0.4rem 0.2rem;
+}
+
+.mesh-stat-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--amber);
+}
+
+.mesh-stat-label {
+  font-size: 0.65rem;
+  opacity: 0.65;
+  text-transform: uppercase;
+}
+
+.mesh-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mesh-channel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mesh-channel-row.active {
+  background: var(--surface-4);
+  color: var(--amber);
+}
+
+.mesh-unread-badge {
+  background: var(--amber);
+  color: var(--bg-app);
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+}
+
+.mesh-quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mesh-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mesh-chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0.1rem;
+}
+
+.mesh-chat-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.mesh-messages {
+  max-height: 380px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-right: 0.3rem;
+}
+
+.mesh-message {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  max-width: 85%;
+}
+
+.mesh-message.outbound {
+  background: var(--surface-4);
+  align-self: flex-end;
+}
+
+.mesh-message-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.7rem;
+  opacity: 0.7;
+  margin-bottom: 0.15rem;
+}
+
+.mesh-message-delete {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.4;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.mesh-message-delete:hover {
+  opacity: 1;
+  color: var(--red);
+}
+
+.mesh-message-status {
+  font-size: 0.7rem;
+  margin-top: 0.2rem;
+  opacity: 0.75;
+}
+
+.mesh-message.status-failed .mesh-message-status {
+  color: var(--red);
+  opacity: 1;
+}
+
+.mesh-message.status-delivered .mesh-message-status {
+  color: var(--green);
+}
+
+.mesh-compose {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Every child needs min-width: 0 or the flex row refuses to shrink and
+   the inputs overflow the panel -- the recurring layout bug in this app. */
+.mesh-compose > * {
+  min-width: 0;
+}
+
+.mesh-compose > input {
+  flex: 1 1 160px;
+}
+
+.mesh-ack-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mesh-participant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mesh-participant-row {
+  border-left: 4px solid var(--green);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+
+.mesh-health-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  padding: 0.15rem 0;
+}
+
+.mesh-footer {
+  text-align: right;
+  font-size: 0.65rem;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-top: 0.2rem;
+}
+
+/* Icon-bearing controls added for closer fidelity to Frank's mesh mockup. */
+
+.mesh-inline-icon {
+  vertical-align: -2px;
+  margin-right: 0.3em;
+  flex: none;
+}
+
+.mesh-pill {
+  border-radius: 999px !important;
+}
+
+.mesh-section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mesh-label-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  opacity: 0.65;
+}
+
+.mesh-icon-button {
+  display: inline-flex;
+  padding: 0.15rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.mesh-icon-button:hover {
+  color: var(--amber);
+}
+
+/* Not a button -- the mockup pairs a gear next to the refresh control, but
+   nothing behind it is wired up yet (would need cross-panel navigation to
+   Settings). Rendered as plain decoration rather than a control that does
+   nothing when clicked. */
+.mesh-icon-decorative {
+  display: inline-flex;
+}
+
+.mesh-channel-row-label {
+  display: flex;
+  align-items: center;
+}
+
+.mesh-chat-title-select {
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0.1rem 0;
+}
+
+.mesh-participant-chip {
+  display: inline-flex;
+  align-items: center;
+}
+
+.mesh-channel-details {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: var(--surface-1);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.75rem;
+}
+
+.mesh-channel-details-title {
+  font-weight: 600;
+}
+
+.mesh-channel-details-desc {
+  opacity: 0.7;
+  margin-top: 0.1rem;
+}
+
+.mesh-message-sender-chip {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.65rem;
+  opacity: 0.6;
+  margin-top: 0.2rem;
+}
+
+.mesh-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.mesh-participant-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.mesh-participant-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.mesh-participant-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.mesh-presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  margin-top: 0.3rem;
+  flex: none;
+}
+
+/* Inline variant for a presence dot embedded in a text label (node cards)
+   rather than leading a flex row (participant rows). */
+.mesh-presence-dot-inline {
+  display: inline-block;
+  margin: 0 0.4em 0 0;
+  vertical-align: middle;
+}
+
+.mesh-presence-dot.up {
+  background: var(--green);
+  box-shadow: 0 0 5px var(--green);
+}
+
+.mesh-owner-badge {
+  background: var(--surface-5);
+  color: var(--amber);
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.1rem 0.5rem;
+  flex: none;
+}
+
+.mesh-health-label {
+  display: flex;
+  align-items: center;
+}
+
+/* Satellite passes */
+
+.panel-satellite {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.satellite-ground-track {
+  width: 100%;
+}
+
+.satellite-ground-track canvas {
+  width: 100%;
+  display: block;
+  border-radius: 6px;
+}
+
+/* About */
+
+.panel-about {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.panel-about button {
+  align-self: flex-start;
+  margin-top: 0.3rem;
+}
+
+/* Matches the neon-green glow of the Radio Preppers group branding. */
+.radio-preppers-button {
+  color: #39ff14;
+  background: #0a0f0a;
+  border: 1px solid #39ff14;
+  border-radius: 6px;
+  padding: 0.5em 0.9em;
+  font-weight: 600;
+  text-shadow: 0 0 6px rgba(57, 255, 20, 0.8), 0 0 14px rgba(57, 255, 20, 0.4);
+  box-shadow: 0 0 8px rgba(57, 255, 20, 0.35), inset 0 0 8px rgba(57, 255, 20, 0.08);
+  transition: box-shadow 0.15s ease, text-shadow 0.15s ease;
+}
+
+.radio-preppers-button:hover {
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.95), 0 0 20px rgba(57, 255, 20, 0.6);
+  box-shadow: 0 0 14px rgba(57, 255, 20, 0.55), inset 0 0 10px rgba(57, 255, 20, 0.15);
+}
+
+/* Diagnostics */
+
+.panel-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.diag-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.diag-header button {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.25em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+}
+
+.diag-summary {
+  font-size: 0.85rem;
+}
+
+.diag-ok {
+  color: var(--green);
+}
+
+.diag-problem {
+  color: var(--amber);
+}
+
+.diag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.diag-row {
+  border-left: 3px solid var(--gray);
+  border-radius: 0;
+  background: var(--surface-2);
+  padding: 0.45rem 0.6rem;
+}
+
+.diag-status-healthy {
+  border-left-color: var(--green);
+}
+
+.diag-status-degraded {
+  border-left-color: var(--amber);
+}
+
+.diag-status-down {
+  border-left-color: var(--red);
+}
+
+.diag-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.diag-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.diag-chips {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.diag-badge {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.15em 0.5em;
+  border-radius: 999px;
+  background: var(--surface-4);
+}
+
+.diag-badge-healthy {
+  color: var(--green);
+}
+
+.diag-badge-degraded {
+  color: var(--amber);
+}
+
+.diag-badge-down {
+  color: var(--red);
+}
+
+.diag-meta {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-top: 0.15rem;
+}
+
+.diag-detail {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin-top: 0.3rem;
+  opacity: 0.9;
+}
+
+.winlink-hint {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
+.winlink-hint a {
+  color: var(--amber);
+}
+
+.winlink-cmd {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.manual-cmd {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* Rig control */
+
+.panel-rig {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.rig-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.rig-freq {
+  font-size: 1.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(57, 217, 122, 0.35);
+}
+
+.rig-unit {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-left: 0.35rem;
+  text-shadow: none;
+}
+
+.rig-chips {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.rig-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.rig-modes button {
+  font-size: 0.7rem;
+  padding: 0.25em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: inherit;
+  cursor: pointer;
+}
+
+.rig-modes button.rig-mode-active {
+  background: var(--surface-5);
+  color: var(--amber);
+  border-color: var(--amber-dim);
+}
+
+.rig-hint {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
+.rig-cmd {
+  display: block;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.rig-note {
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
+/* Manual offline toggle */
+
+.tactical-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25em 0.7em;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tactical-mode-tactical {
+  background: var(--surface-4);
+  color: var(--amber);
+  border-color: var(--border-strong);
+}
+
+.tactical-mode-hobbyist {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.offline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25em 0.7em;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+}
+
+.offline-toggle:hover {
+  border-color: var(--border-strong);
+}
+
+.offline-toggle-track {
+  width: 30px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--surface-5);
+  position: relative;
+  flex: none;
+  transition: background 0.15s;
+}
+
+.offline-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--green);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.offline-toggle-off .offline-toggle-knob {
+  transform: translateX(15px);
+  background: var(--amber);
+}
+
+.offline-toggle-on .offline-toggle-label {
+  color: var(--green);
+}
+
+.offline-toggle-off .offline-toggle-label {
+  color: var(--amber);
+}
+
+.connectivity-badge.state-offline_manual {
+  border-color: var(--amber-dim);
+}
+
+.panel-station-identity .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.panel-station-identity .checkbox-label input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--amber);
+}
+
+.panel-station-identity .checkbox-label .field-hint {
+  flex-basis: 100%;
+}
+
+.panel-station-identity .field-warning {
+  display: block;
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-left: 3px solid var(--red);
+  border-radius: 0;
+  background: var(--surface-2);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.diag-backup {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.diag-backup-text {
+  flex: 1;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
+.diag-backup button {
+  flex: none;
+  font-size: 0.75rem;
+  padding: 0.4em 0.9em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+}
+
+.diag-backup button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.diag-backup-error {
+  flex-basis: 100%;
+  color: var(--red);
+  font-size: 0.72rem;
+}

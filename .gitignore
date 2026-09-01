@@ -1,0 +1,25 @@
+# Node dependencies — reinstall via `npm install`
+app/node_modules/
+
+# Vite build output — regenerate via `npm run build`
+app/dist/
+
+# Tauri/Rust backend build artifacts (huge — 20GB+) and auto-generated
+# capability schemas. Regenerate via `cargo build` / `tauri dev`.
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+
+# Runtime SQLite database and backups — real operational data (station
+# identity, messages, net roster), never source, never belongs in git.
+app/src-tauri/*.db
+app/src-tauri/*.db-journal
+app/src-tauri/*.sqlite
+app/src-tauri/*.sqlite3
+
+# Design-exploration scratch images — not yet decided whether these are
+# meant to be public documentation assets. Excluded until that's decided.
+theme plans/
+
+# OS cruft
+.DS_Store
+Thumbs.db
