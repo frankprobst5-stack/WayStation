@@ -505,10 +505,19 @@ pub struct Message {
     /// "did the dispatcher hand it to something," not "did it arrive."
     pub dispatch_status: String,
     pub dispatched_via: Option<String>,
+    // -- Canonical object header (v30) -- see the migration's comment for
+    // the full rationale. Same six fields, same meaning, on every object
+    // type; `map_markers` carries the identical set below.
+    pub uuid: String,
+    pub revision: i64,
+    pub updated_at: Option<String>,
+    pub incident_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub trust_state: String,
 }
 
 const MESSAGE_COLUMNS: &str =
-    "id, precedence, date_time, to_station, to_name, from_station, from_name, subject, message_text, content_hash, dispatch_status, dispatched_via";
+    "id, precedence, date_time, to_station, to_name, from_station, from_name, subject, message_text, content_hash, dispatch_status, dispatched_via, uuid, revision, updated_at, incident_id, expires_at, trust_state";
 
 fn message_from_row(row: &rusqlite::Row) -> rusqlite::Result<Message> {
     Ok(Message {
@@ -524,6 +533,12 @@ fn message_from_row(row: &rusqlite::Row) -> rusqlite::Result<Message> {
         content_hash: row.get(9)?,
         dispatch_status: row.get(10)?,
         dispatched_via: row.get(11)?,
+        uuid: row.get(12)?,
+        revision: row.get(13)?,
+        updated_at: row.get(14)?,
+        incident_id: row.get(15)?,
+        expires_at: row.get(16)?,
+        trust_state: row.get(17)?,
     })
 }
 
@@ -599,18 +614,19 @@ pub fn create_message(
 ) -> Message {
     let now = chrono::Utc::now().to_rfc3339();
     let hash = content_hash(from_station.as_deref(), to_station.as_deref(), subject.as_deref(), &message_text);
+    let uuid = uuid::Uuid::new_v4().to_string();
     let conn = db.0.lock().expect("db mutex poisoned");
     conn.execute(
-        "INSERT INTO messages (precedence, date_time, to_station, to_name, from_station, from_name, subject, message_text, content_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![precedence, now, to_station, to_name, from_station, from_name, subject, message_text, hash],
+        "INSERT INTO messages (precedence, date_time, to_station, to_name, from_station, from_name, subject, message_text, content_hash, uuid, updated_at, trust_state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'local')",
+        params![precedence, now, to_station, to_name, from_station, from_name, subject, message_text, hash, uuid, now],
     )
     .expect("failed to create message");
     let id = conn.last_insert_rowid();
     Message {
         id,
         precedence,
-        date_time: now,
+        date_time: now.clone(),
         to_station,
         to_name,
         from_station,
@@ -620,6 +636,12 @@ pub fn create_message(
         content_hash: Some(hash),
         dispatch_status: "queued".to_string(),
         dispatched_via: None,
+        uuid,
+        revision: 1,
+        updated_at: Some(now),
+        incident_id: None,
+        expires_at: None,
+        trust_state: "local".to_string(),
     }
 }
 
@@ -641,10 +663,18 @@ pub struct MapMarker {
     pub dispatch_status: String,
     pub dispatched_via: Option<String>,
     pub received_via: Option<String>,
+    // -- Canonical object header (v30) -- identical shape to Message's,
+    // see that struct / the v30 migration comment for the rationale.
+    pub uuid: String,
+    pub revision: i64,
+    pub updated_at: Option<String>,
+    pub incident_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub trust_state: String,
 }
 
 const MARKER_COLUMNS: &str =
-    "id, label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via";
+    "id, label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via, uuid, revision, updated_at, incident_id, expires_at, trust_state";
 
 fn marker_from_row(row: &rusqlite::Row) -> rusqlite::Result<MapMarker> {
     Ok(MapMarker {
@@ -660,6 +690,12 @@ fn marker_from_row(row: &rusqlite::Row) -> rusqlite::Result<MapMarker> {
         dispatch_status: row.get(9)?,
         dispatched_via: row.get(10)?,
         received_via: row.get(11)?,
+        uuid: row.get(12)?,
+        revision: row.get(13)?,
+        updated_at: row.get(14)?,
+        incident_id: row.get(15)?,
+        expires_at: row.get(16)?,
+        trust_state: row.get(17)?,
     })
 }
 
@@ -734,10 +770,11 @@ pub fn create_marker(
     let origin = station_profile(&conn).callsign;
     let hash = marker_content_hash(&label, &marker_type, latitude, longitude, origin.as_deref());
     let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued')",
-        params![label, marker_type, latitude, longitude, origin, to_station, now, hash],
+        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, uuid, updated_at, trust_state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', ?9, ?10, 'local')",
+        params![label, marker_type, latitude, longitude, origin, to_station, now, hash, uuid, now],
     )
     .map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
@@ -759,11 +796,12 @@ pub fn insert_received_marker(
 ) {
     let hash = marker_content_hash(label, marker_type, latitude, longitude, origin);
     let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, created_at, content_hash, dispatch_status, received_via)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'received', ?8)
+        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, created_at, content_hash, dispatch_status, received_via, uuid, updated_at, trust_state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'received', ?8, ?9, ?10, 'received')
          ON CONFLICT(content_hash) DO NOTHING",
-        params![label, marker_type, latitude, longitude, origin, now, hash, via],
+        params![label, marker_type, latitude, longitude, origin, now, hash, via, uuid, now],
     )
     .expect("failed to insert received marker");
 }
@@ -2249,6 +2287,44 @@ const MIGRATIONS: &[&str] = &[
         received_via    TEXT
     );
     "#,
+    // v30: canonical operational-object header, decided 2026-09-01 -- the
+    // shared shape every object type (starting with messages and map
+    // markers, per the roadmap's own ordering) needs before cross-station
+    // sync or routing can exist. `id` stays the fast local primary key;
+    // `uuid` is the stable identity that has to survive across different
+    // stations' databases -- two different homes' WayStation instances
+    // will each have a local `id = 47` the moment more than one exists,
+    // so autoincrement can never be the identity that leaves this
+    // machine. Nullable at the schema level only because SQLite can't
+    // backfill a per-row-unique value in a single ALTER TABLE statement;
+    // every existing row gets a real UUID immediately after this
+    // migration runs (see `backfill_object_uuids`), and every future
+    // insert provides one at create time -- by the time the app finishes
+    // opening the database, this column is never actually null in
+    // practice. `revision`/`updated_at` support the "explicit conflict
+    // and revision rules before peer synchronization" the roadmap calls
+    // for. `incident_id` is nullable because most day-to-day traffic
+    // isn't part of a declared incident. `trust_state` defaults 'local'
+    // for anything created on this station; `insert_received_marker`
+    // (the one real inbound-object path that exists today) sets it to
+    // 'received' explicitly -- same honesty principle as everywhere else
+    // in this app: data that arrived from somewhere else must never look
+    // indistinguishable from data this station actually originated.
+    r#"
+    ALTER TABLE messages ADD COLUMN uuid TEXT;
+    ALTER TABLE messages ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE messages ADD COLUMN updated_at TEXT;
+    ALTER TABLE messages ADD COLUMN incident_id TEXT;
+    ALTER TABLE messages ADD COLUMN expires_at TEXT;
+    ALTER TABLE messages ADD COLUMN trust_state TEXT NOT NULL DEFAULT 'local';
+
+    ALTER TABLE map_markers ADD COLUMN uuid TEXT;
+    ALTER TABLE map_markers ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE map_markers ADD COLUMN updated_at TEXT;
+    ALTER TABLE map_markers ADD COLUMN incident_id TEXT;
+    ALTER TABLE map_markers ADD COLUMN expires_at TEXT;
+    ALTER TABLE map_markers ADD COLUMN trust_state TEXT NOT NULL DEFAULT 'local';
+    "#,
 ];
 
 pub fn data_dir() -> PathBuf {
@@ -2263,7 +2339,31 @@ pub fn open() -> Connection {
     let path = data_dir().join("waystation.db");
     let mut conn = Connection::open(path).expect("failed to open database");
     migrate(&mut conn);
+    backfill_object_uuids(&conn);
     conn
+}
+
+/// Runs after every `migrate()` call, not just once after v30 -- cheap
+/// (a no-op `UPDATE ... WHERE uuid IS NULL` on every launch once real
+/// rows exist) and it means a database restored from a backup taken
+/// between v30 landing and this function existing, or any other path
+/// that leaves a row with a null uuid, self-heals on next launch rather
+/// than staying broken. `Uuid::new_v4()` per row, not a single shared
+/// value -- the whole point is a globally unique identity per object.
+fn backfill_object_uuids(conn: &Connection) {
+    for table in ["messages", "map_markers"] {
+        let ids: Vec<i64> = conn
+            .prepare(&format!("SELECT id FROM {table} WHERE uuid IS NULL"))
+            .and_then(|mut stmt| stmt.query_map([], |row| row.get(0))?.collect())
+            .unwrap_or_else(|e| panic!("failed to find rows needing a uuid backfill in {table}: {e}"));
+        for id in ids {
+            conn.execute(
+                &format!("UPDATE {table} SET uuid = ?1 WHERE id = ?2"),
+                params![uuid::Uuid::new_v4().to_string(), id],
+            )
+            .unwrap_or_else(|e| panic!("failed to backfill uuid for {table} id {id}: {e}"));
+        }
+    }
 }
 
 /// Each migration applies atomically -- all its statements commit

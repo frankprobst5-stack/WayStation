@@ -18,6 +18,7 @@ mod rig;
 mod rotator;
 mod satellite;
 mod space_weather;
+mod transport;
 
 use db::Db;
 use std::sync::Mutex;

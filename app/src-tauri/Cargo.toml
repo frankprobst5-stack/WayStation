@@ -35,6 +35,7 @@ sysinfo = "0.32"
 roxmltree = "0.21.1"
 sgp4 = "2.4"
 sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
 # default-features off deliberately drops the tokio requirement -- every
 # other transport in this codebase (Pat, JS8Call, DX cluster) is
 # synchronous std::thread + blocking I/O, and pulling in a second

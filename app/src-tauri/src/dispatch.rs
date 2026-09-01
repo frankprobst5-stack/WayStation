@@ -1,15 +1,12 @@
 //! Message dispatcher — closes the real gap flagged in the hybrid-
 //! architecture review (2026-08-29): ICS-213 messages only ever got
-//! logged locally, never actually sent anywhere. This tries each
-//! transport in priority order rather than unifying them behind a shared
-//! Rust trait — Mesh, Winlink, and JS8Call have genuinely different send
-//! semantics (delivery-confirmed / store-and-forward / none at all yet),
-//! and forcing them into one interface was considered and rejected as
-//! premature abstraction: a trait with only one real implementation
-//! behind it doesn't save any code, it just adds one.
+//! logged locally, never actually sent anywhere. Tries each transport
+//! in priority order via the `transport::Transport` trait (see that
+//! module for why the trait itself was deferred, then built, rather
+//! than designed up front).
 //!
-//! Three legs, tried in order: Mesh (short range, no dependency on an RMS
-//! gateway being reachable), Winlink via Pat's local outbox API
+//! Three legs, tried in order: Mesh (short range, no dependency on an
+//! RMS gateway being reachable), Winlink via Pat's local outbox API
 //! (`POST /api/mailbox/out`, verified against Pat's actual source since
 //! it isn't otherwise documented — see `pat::post_to_outbox`; posting is
 //! purely local, this deliberately never triggers `/api/connect`, the
@@ -24,47 +21,9 @@
 //! successfully processed it — genuinely weaker confirmation than the
 //! other two legs, which both get a real success/failure signal back.
 
-use crate::db::{self, Db, MapMarker, Message, MeshNode};
-use crate::js8call;
-use crate::mesh::{self, MeshState};
-use crate::pat;
+use crate::db::{Db, MapMarker, Message};
+use crate::transport::{self, Destination, OutboundEnvelope, Payload};
 use tauri::{AppHandle, Manager};
-
-/// Finds exactly one mesh node whose name/ID case-insensitively matches
-/// a callsign. Deliberately returns None on zero *or multiple* matches —
-/// a station's callsign isn't a guaranteed-unique field on a Meshtastic
-/// node (long_name/short_name/user_id are whatever the node owner typed),
-/// so guessing which of two similarly-named nodes is the right one is
-/// worse than an honest "couldn't find a route."
-fn find_mesh_node(nodes: &[MeshNode], callsign: &str) -> Option<i64> {
-    let needle = callsign.trim().to_uppercase();
-    if needle.is_empty() {
-        return None;
-    }
-    let matches: Vec<i64> = nodes
-        .iter()
-        .filter(|n| {
-            [&n.user_id, &n.long_name, &n.short_name]
-                .iter()
-                .any(|f| f.as_deref().map(|s| s.trim().to_uppercase() == needle).unwrap_or(false))
-        })
-        .map(|n| n.node_num)
-        .collect();
-    match matches.as_slice() {
-        [only] => Some(*only),
-        _ => None,
-    }
-}
-
-fn format_for_mesh(m: &Message) -> String {
-    format!(
-        "ICS-213 #{} [{}] {} :: {}",
-        m.id,
-        m.precedence.to_uppercase(),
-        m.subject.as_deref().unwrap_or("(no subject)"),
-        m.message_text,
-    )
-}
 
 /// Tries to actually send a message, in priority order. Returns which
 /// transport it went out on, or None if nothing could reach it right
@@ -76,35 +35,20 @@ fn try_dispatch(app: &AppHandle, m: &Message) -> Option<String> {
     if to.trim().is_empty() {
         return None;
     }
-
-    // -- Mesh first: short range, no dependency on a gateway being up. --
-    let mesh_state = app.state::<MeshState>();
-    let connected = mesh_state.stream.lock().expect("mesh state mutex poisoned").is_some();
-    if connected {
-        let nodes = db::get_mesh_nodes(app.state::<Db>());
-        if let Some(node_num) = find_mesh_node(&nodes, to) {
-            let text = format_for_mesh(m);
-            if mesh::send_mesh_text(app.state::<MeshState>(), app.state::<Db>(), text, Some(node_num), 0, true).is_ok() {
-                return Some("mesh".to_string());
-            }
-        }
-    }
-
-    // -- Winlink: queues into Pat's local outbox. A Winlink address is
-    // just the recipient's callsign, so `to` needs no transformation. --
-    let subject = m.subject.as_deref().unwrap_or("(no subject)");
-    let body = format!("ICS-213 #{} [{}]\n\n{}", m.id, m.precedence.to_uppercase(), m.message_text);
-    if pat::post_to_outbox(to, subject, &body).is_ok() {
-        return Some("winlink".to_string());
-    }
-
-    // -- JS8Call last: long range, slowest of the three. --
-    let js8_text = format!("ICS-213 #{}: {}", m.id, m.message_text);
-    if js8call::send_message(to, &js8_text).is_ok() {
-        return Some("js8call".to_string());
-    }
-
-    None
+    let envelope = OutboundEnvelope {
+        destination: Destination::Station(to.to_string()),
+        payload: Payload::IcsMessage {
+            id: m.id,
+            precedence: &m.precedence,
+            subject: m.subject.as_deref(),
+            text: &m.message_text,
+        },
+        want_ack: true,
+    };
+    transport::transports()
+        .into_iter()
+        .find(|t| t.send(app, &envelope).is_ok())
+        .map(|t| t.id().to_string())
 }
 
 #[tauri::command]
@@ -112,14 +56,14 @@ pub fn dispatch_message(app: AppHandle, message_id: i64) -> Result<Message, Stri
     let existing = {
         let db = app.state::<Db>();
         let conn = db.0.lock().expect("db mutex poisoned");
-        db::get_message(&conn, message_id).ok_or("message not found")?
+        crate::db::get_message(&conn, message_id).ok_or("message not found")?
     };
 
     if let Some(via) = try_dispatch(&app, &existing) {
         let db = app.state::<Db>();
         let conn = db.0.lock().expect("db mutex poisoned");
-        db::mark_message_dispatched(&conn, message_id, &via);
-        Ok(db::get_message(&conn, message_id).unwrap_or(existing))
+        crate::db::mark_message_dispatched(&conn, message_id, &via);
+        Ok(crate::db::get_message(&conn, message_id).unwrap_or(existing))
     } else {
         Ok(existing)
     }
@@ -132,13 +76,13 @@ pub fn redispatch_queued(app: &AppHandle) {
     let queued = {
         let db = app.state::<Db>();
         let conn = db.0.lock().expect("db mutex poisoned");
-        db::queued_messages(&conn)
+        crate::db::queued_messages(&conn)
     };
     for m in queued {
         if let Some(via) = try_dispatch(app, &m) {
             let db = app.state::<Db>();
             let conn = db.0.lock().expect("db mutex poisoned");
-            db::mark_message_dispatched(&conn, m.id, &via);
+            crate::db::mark_message_dispatched(&conn, m.id, &via);
         }
     }
 }
@@ -192,44 +136,26 @@ pub fn parse_marker_wire(text: &str) -> Option<ParsedMarker> {
 
 /// Mirrors `try_dispatch`, but markers have a real broadcast case
 /// messages don't: a pin with no specific `to_station` is meant for
-/// everyone on the mesh (situational awareness, not a private message),
-/// so it goes out as a mesh broadcast rather than being skipped. Winlink
-/// and JS8Call have no broadcast concept, so those two legs only fire
-/// when a specific recipient was requested.
+/// everyone on the mesh (situational awareness, not a private message).
+/// `WinlinkTransport`/`Js8CallTransport` both refuse a `Broadcast`
+/// envelope (see `transport.rs`), so those two legs simply don't fire
+/// for an unaddressed marker — same outcome as before, now enforced
+/// inside the transport instead of by an `if` here.
 fn try_dispatch_marker(app: &AppHandle, m: &MapMarker) -> Option<String> {
-    let text = format_marker_for_wire(m);
-
-    let mesh_state = app.state::<MeshState>();
-    let connected = mesh_state.stream.lock().expect("mesh state mutex poisoned").is_some();
-    if connected {
-        // Some(None) = broadcast to everyone; Some(Some(id)) = DM a
-        // matched node; None = a specific recipient was requested but no
-        // single matching node was found, so mesh is skipped entirely
-        // rather than broadcasting something that was meant to be private.
-        let mesh_target: Option<Option<i64>> = match m.to_station.as_deref() {
-            None => Some(None),
-            Some(to) => {
-                let nodes = db::get_mesh_nodes(app.state::<Db>());
-                find_mesh_node(&nodes, to).map(Some)
-            }
-        };
-        if let Some(node_target) = mesh_target {
-            if mesh::send_mesh_text(app.state::<MeshState>(), app.state::<Db>(), text.clone(), node_target, 0, m.to_station.is_some()).is_ok() {
-                return Some("mesh".to_string());
-            }
-        }
-    }
-
-    if let Some(to) = m.to_station.as_deref() {
-        if pat::post_to_outbox(to, "WayStation situational marker", &text).is_ok() {
-            return Some("winlink".to_string());
-        }
-        if js8call::send_message(to, &text).is_ok() {
-            return Some("js8call".to_string());
-        }
-    }
-
-    None
+    let wire = format_marker_for_wire(m);
+    let destination = match m.to_station.as_deref() {
+        None => Destination::Broadcast,
+        Some(to) => Destination::Station(to.to_string()),
+    };
+    let envelope = OutboundEnvelope {
+        destination,
+        payload: Payload::Marker(&wire),
+        want_ack: m.to_station.is_some(),
+    };
+    transport::transports()
+        .into_iter()
+        .find(|t| t.send(app, &envelope).is_ok())
+        .map(|t| t.id().to_string())
 }
 
 #[tauri::command]
@@ -237,14 +163,14 @@ pub fn dispatch_marker(app: AppHandle, marker_id: i64) -> Result<MapMarker, Stri
     let existing = {
         let db = app.state::<Db>();
         let conn = db.0.lock().expect("db mutex poisoned");
-        db::get_marker(&conn, marker_id).ok_or("marker not found")?
+        crate::db::get_marker(&conn, marker_id).ok_or("marker not found")?
     };
 
     if let Some(via) = try_dispatch_marker(&app, &existing) {
         let db = app.state::<Db>();
         let conn = db.0.lock().expect("db mutex poisoned");
-        db::mark_marker_dispatched(&conn, marker_id, &via);
-        Ok(db::get_marker(&conn, marker_id).unwrap_or(existing))
+        crate::db::mark_marker_dispatched(&conn, marker_id, &via);
+        Ok(crate::db::get_marker(&conn, marker_id).unwrap_or(existing))
     } else {
         Ok(existing)
     }
@@ -256,13 +182,13 @@ pub fn redispatch_queued_markers(app: &AppHandle) {
     let queued = {
         let db = app.state::<Db>();
         let conn = db.0.lock().expect("db mutex poisoned");
-        db::queued_markers(&conn)
+        crate::db::queued_markers(&conn)
     };
     for m in queued {
         if let Some(via) = try_dispatch_marker(app, &m) {
             let db = app.state::<Db>();
             let conn = db.0.lock().expect("db mutex poisoned");
-            db::mark_marker_dispatched(&conn, m.id, &via);
+            crate::db::mark_marker_dispatched(&conn, m.id, &via);
         }
     }
 }
