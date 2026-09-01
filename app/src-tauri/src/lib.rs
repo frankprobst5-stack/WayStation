@@ -50,10 +50,42 @@ pub fn run() {
     apply_wayland_webkit_workaround();
 
     tauri::Builder::default()
+        // Must be the first plugin registered -- its whole job is deciding,
+        // before anything else runs, whether this process should hand off
+        // to an already-running instance and exit instead of starting a
+        // second one. That matters here specifically: a second WayStation
+        // process would open the same SQLite file and try to rebind the
+        // same mesh/rig/rotator TCP ports as the first, which is a real
+        // resource-contention bug, not a cosmetic one -- so a second
+        // launch (e.g. clicking Citadel's Communications Hub tile while
+        // WayStation is already open) must focus the existing window
+        // rather than spawn a competing process.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Dynamic runtime registration of the waystation:// scheme.
+            // Only needed on Linux dev/unbundled builds -- a real .deb/AppImage
+            // build gets its MimeType=x-scheme-handler/waystation; association
+            // baked into the .desktop file by Tauri's bundler at package time
+            // (driven by the `plugins.deep-link` config in tauri.conf.json),
+            // and macOS/Windows installers register the scheme at install
+            // time too. This call is what makes `xdg-open waystation://...`
+            // work against a `cargo tauri dev` binary before it's ever been
+            // packaged.
+            #[cfg(target_os = "linux")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register("waystation")?;
+            }
+
             let conn = db::open();
             app.manage(Db(Mutex::new(conn)));
             app.manage(pat::PatProcess(Mutex::new(None)));

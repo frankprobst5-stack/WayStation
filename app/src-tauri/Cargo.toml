@@ -29,6 +29,8 @@ dirs = "5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
 sysinfo = "0.32"
 roxmltree = "0.21.1"
 sgp4 = "2.4"
