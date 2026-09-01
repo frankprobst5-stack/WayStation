@@ -57,6 +57,10 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 - `Transport` trait (`transport.rs`) with full `MeshTransport`/`WinlinkTransport`/`Js8CallTransport` implementations, derived from three real, already-working send paths rather than designed speculatively. `dispatch.rs`'s two near-duplicate if-chains (one for messages, one for markers) collapsed into one shared loop. Deliberately preserves a real, pre-existing asymmetry: ICS-213 messages get per-transport-tailored formatting (mesh's compact single line vs. Winlink's full body vs. JS8Call's most-compact-of-all, matching real JS8 bandwidth limits), while situational markers share one exact wire format across all three transports, since a marker is a parseable protocol another station decodes, not prose.
 - Verified at three levels: 18 automated tests (10 new, including exact-string tests against the pre-refactor wire formats — this caught a real mistake in the first draft that would have collapsed the three message formats into one); a clean release build; and two live integration tests run against Frank's actual logged-in Pat and JS8Call sessions, with the resulting test message independently confirmed sitting in the real Pat outbox via the API. **Mesh is not verified live** — no Meshtastic node was connected this session, so `MeshTransport` has unit-test coverage only.
 
+**Durable delivery-attempt history — built and verified, 2026-09-01**
+- v31 migration: `delivery_attempts` table, keyed by object `uuid` (not the local integer id). `dispatch.rs`'s `try_dispatch`/`try_dispatch_marker` now share one `dispatch_with_logging()` helper that records every transport attempt — success or failure — instead of only the winning one. Closes the real gap where `dispatch_status`/`dispatched_via` only ever showed the latest outcome, never the road there.
+- Verified: 2 new tests proving a message tried on a failing transport then a succeeding one leaves both attempts queryable in order (22 tests total, 20 passing + 2 live-service-only skipped by default), clean release build, no new clippy issues.
+
 ---
 
 ## Built, but not yet proven in the field
@@ -72,7 +76,7 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 
 1. **Canonical operational objects** — ✅ **done** (see above). Message and map marker are the first two objects carrying the shared header. Alert, station, person, team, resource, request, assignment, incident, SITREP, acknowledgement, and status-event objects are not yet converted.
 2. **WayStation Interchange Protocol (WSP/1)** — 🔲 **not started.** A compact versioned wire representation, fragmentation/reassembly/dedup/compression/ack/TTL, a human-readable diagnostic form and a compact RF form, signed/authenticated object support. This is the next real architectural gap.
-3. **Delivery and transport architecture** — ✅ **transport layer done** (the `Transport` trait). 🔲 The durable outbound queue with delivery-attempt history is **not** built yet — `dispatch_status`/`dispatched_via` on `messages`/`map_markers` capture latest state only, not a full attempt history.
+3. **Delivery and transport architecture** — ✅ **done.** The `Transport` trait plus the v31 delivery-attempt history together cover this: every attempt on every transport is now a real, queryable record, not just a latest-state field.
 4. **Peer synchronization** — 🔲 **not started.** This is next: prove reconciliation between two local WayStation instances before ever touching real mesh/AREDN hardware.
 
 ---
@@ -81,7 +85,7 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 
 - **Phase A — Stabilize the current application.** Partial: real regression tests exist for the migration system and the new transport layer; Windows/Linux CI and packaging, first-run onboarding, and a full simulated offline/crash/long-duration exercise are still open.
 - **Phase B — Operational object foundation.** ✅ **Done, 2026-09-01.** Object header, message + marker conversion, revision/provenance rules. WSP/1 documentation and serialization fixtures are the one piece of Phase B not yet done — worth finishing before Phase C's sync work needs it.
-- **Phase C — Two-station communications proof.** 🔲 **Next up.** Build the durable queue + delivery-attempt history, derive the synchronous transport interface from the (now real) `Transport` implementations, build a unified traffic view, and prove `create → send → receive → acknowledge → reconcile → audit` between two local WayStation instances before ever touching physical mesh/AREDN. This is fully testable today with zero additional hardware.
+- **Phase C — Two-station communications proof.** 🔲 **In progress.** Durable queue + delivery-attempt history done (v31). Left: derive the synchronous transport interface from the (now real) `Transport` implementations, build a unified traffic view, and prove `create → send → receive → acknowledge → reconcile → audit` between two local WayStation instances before ever touching physical mesh/AREDN. This is fully testable today with zero additional hardware.
 - **Phase D — Incident operations.** 🔲 Not started. Incident workspace/lifecycle, personnel/teams/resources, structured SITREP, operational timeline, tactical map driven by incident objects.
 - **Phase E — Software-complete application.** 🔲 Not started as a phase, though today's work is a down payment on its philosophy: build every hardware-facing capability against simulation/replay/fixtures so real equipment is never a blocker for finishing the software.
 - **Phase F — Release candidate and tester deployment.** 🔲 Not started.
@@ -91,9 +95,9 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 ## Immediate next priorities
 
 1. ~~**Operational object design**~~ — ✅ done 2026-09-01.
-2. **Two-instance proof without new hardware** — run two isolated WayStation databases, exchange object summaries and requested objects over local TCP or files, prove deduplication/interrupt-resume/conflict/convergence, then reuse the exact same protocol later over physical mesh/AREDN. **This is the current priority.**
-3. **WSP/1 test fixtures** — worth writing alongside or just before #2, since the two-instance proof needs *some* wire format to exchange objects over, even a minimal first version.
-4. **Durable outbound queue with delivery-attempt history** — currently `dispatch_status` only tracks latest state; a real history (queued → route selected → transmitting → ack waiting → delivered, or failed → recalculate → try next path) is what Phase C's "audit" step actually needs.
+2. ~~**Durable outbound queue with delivery-attempt history**~~ — ✅ done 2026-09-01.
+3. **Two-instance proof without new hardware** — run two isolated WayStation databases, exchange object summaries and requested objects over local TCP or files, prove deduplication/interrupt-resume/conflict/convergence, then reuse the exact same protocol later over physical mesh/AREDN. **This is the current priority.**
+4. **WSP/1 test fixtures** — worth writing alongside or just before #3, since the two-instance proof needs *some* wire format to exchange objects over, even a minimal first version.
 5. **Current-state hardening** — CI/packaging, first-run onboarding, a full no-internet exercise on the existing application.
 
 Closing principle, unchanged from the original planning document: **success is not measured by the number of panels. Success is measured by whether WayStation can preserve and move a trustworthy operational picture when ordinary infrastructure fails.**
@@ -120,4 +124,4 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
-- **2026-09-01** — WayStation↔Citadel launch integration (`waystation://` deep link + single-instance), built and verified end-to-end. Canonical object header (v30 migration: uuid/revision/updated_at/incident_id/expires_at/trust_state on messages + map_markers). `Transport` trait, fully migrating all three real transports (mesh/Winlink/JS8Call) off the old hand-duplicated dispatch logic — a deliberate reversal of a 2026-08-29 decision to defer this exact abstraction, revisited because there were finally three real implementations to derive it from instead of designing it speculatively. This `ROADMAP.md` created, replacing the planning-PDF as WayStation's tracked source of truth.
+- **2026-09-01** — WayStation↔Citadel launch integration (`waystation://` deep link + single-instance), built and verified end-to-end. Canonical object header (v30 migration: uuid/revision/updated_at/incident_id/expires_at/trust_state on messages + map_markers). `Transport` trait, fully migrating all three real transports (mesh/Winlink/JS8Call) off the old hand-duplicated dispatch logic — a deliberate reversal of a 2026-08-29 decision to defer this exact abstraction, revisited because there were finally three real implementations to derive it from instead of designing it speculatively. Durable delivery-attempt history (v31), closing the "delivery and transport architecture" gap. This `ROADMAP.md` created, replacing the planning-PDF as WayStation's tracked source of truth.
