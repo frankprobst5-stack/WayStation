@@ -16,10 +16,6 @@ app/src-tauri/*.db-journal
 app/src-tauri/*.sqlite
 app/src-tauri/*.sqlite3
 
-# Design-exploration scratch images — not yet decided whether these are
-# meant to be public documentation assets. Excluded until that's decided.
-theme plans/
-
 # OS cruft
 .DS_Store
 Thumbs.db
