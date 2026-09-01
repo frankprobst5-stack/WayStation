@@ -18,6 +18,7 @@ mod rig;
 mod rotator;
 mod satellite;
 mod space_weather;
+mod sync;
 mod transport;
 
 use db::Db;
@@ -126,6 +127,10 @@ pub fn run() {
             db::create_marker,
             dispatch::dispatch_marker,
             db::get_delivery_attempts,
+            sync::export_manifest_to_file,
+            sync::manifest_diff_from_file,
+            sync::export_objects_to_file,
+            sync::import_objects_from_file,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

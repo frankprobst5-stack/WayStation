@@ -19,7 +19,7 @@
 
 use crate::maidenhead::grid_square_to_lat_lon;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
@@ -487,7 +487,10 @@ pub fn clear_net_roster(db: State<Db>) {
         .expect("failed to clear net_roster");
 }
 
-#[derive(Debug, Clone, Serialize)]
+// Deserialize (not just Serialize, unlike most structs in this file) --
+// this is one of the two object types that travels over the sync wire
+// (see sync.rs), so it needs to come back out of JSON, not just go in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: i64,
     pub precedence: String,
@@ -542,9 +545,10 @@ fn message_from_row(row: &rusqlite::Row) -> rusqlite::Result<Message> {
     })
 }
 
-#[tauri::command]
-pub fn get_messages(db: State<Db>) -> Vec<Message> {
-    let conn = db.0.lock().expect("db mutex poisoned");
+/// Plain-`&Connection` form -- what sync.rs needs, since it builds a
+/// manifest from a connection it already holds the lock on, not a fresh
+/// `State<Db>` extraction.
+pub fn get_messages_conn(conn: &Connection) -> Vec<Message> {
     let mut stmt = conn
         .prepare(&format!("SELECT {MESSAGE_COLUMNS} FROM messages ORDER BY id ASC"))
         .expect("failed to prepare messages query");
@@ -554,12 +558,28 @@ pub fn get_messages(db: State<Db>) -> Vec<Message> {
         .collect()
 }
 
+#[tauri::command]
+pub fn get_messages(db: State<Db>) -> Vec<Message> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_messages_conn(&conn)
+}
+
 /// Used by the dispatcher (not exposed as a command itself) to re-fetch a
 /// single message after an update, without pulling the whole table.
 pub fn get_message(conn: &Connection, id: i64) -> Option<Message> {
     conn.query_row(&format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?1"), params![id], message_from_row)
         .optional()
         .expect("failed to query message")
+}
+
+/// Looks up by the v30 header's stable identity rather than the local
+/// autoincrement id -- what sync.rs needs, since a uuid is the only
+/// thing that means the same object across two different stations'
+/// databases.
+pub fn get_message_by_uuid(conn: &Connection, uuid: &str) -> Option<Message> {
+    conn.query_row(&format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE uuid = ?1"), params![uuid], message_from_row)
+        .optional()
+        .expect("failed to query message by uuid")
 }
 
 /// Every message still sitting in 'queued' with somewhere to send it --
@@ -645,7 +665,45 @@ pub fn create_message(
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// Writes a message that arrived from another WayStation instance via
+/// sync.rs -- preserves the incoming uuid/revision/updated_at exactly
+/// (unlike `create_message`, which mints fresh ones for a genuinely new
+/// local message) since this is adopting someone else's object, not
+/// creating one. `trust_state` is forced to `'received'` regardless of
+/// what the incoming record claims -- same reasoning as
+/// `insert_received_marker` already established: a station's own
+/// database is the only thing allowed to call something `'local'`, a
+/// peer's claim about its own trust level isn't taken at face value.
+pub fn insert_synced_message(conn: &Connection, m: &Message) {
+    conn.execute(
+        "INSERT INTO messages (precedence, date_time, to_station, to_name, from_station, from_name, subject, message_text, content_hash, dispatch_status, dispatched_via, uuid, revision, updated_at, incident_id, expires_at, trust_state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'received')",
+        params![
+            m.precedence, m.date_time, m.to_station, m.to_name, m.from_station, m.from_name, m.subject, m.message_text,
+            m.content_hash, m.dispatch_status, m.dispatched_via, m.uuid, m.revision, m.updated_at, m.incident_id, m.expires_at
+        ],
+    )
+    .expect("failed to insert synced message");
+}
+
+/// Overwrites an existing message (matched by uuid, not local id) with
+/// a newer revision that arrived via sync -- see `insert_synced_message`
+/// for why `trust_state` is forced rather than trusted from the wire.
+pub fn update_synced_message(conn: &Connection, m: &Message) {
+    conn.execute(
+        "UPDATE messages SET precedence = ?1, date_time = ?2, to_station = ?3, to_name = ?4, from_station = ?5, from_name = ?6,
+         subject = ?7, message_text = ?8, content_hash = ?9, dispatch_status = ?10, dispatched_via = ?11, revision = ?12,
+         updated_at = ?13, incident_id = ?14, expires_at = ?15, trust_state = 'received'
+         WHERE uuid = ?16",
+        params![
+            m.precedence, m.date_time, m.to_station, m.to_name, m.from_station, m.from_name, m.subject, m.message_text,
+            m.content_hash, m.dispatch_status, m.dispatched_via, m.revision, m.updated_at, m.incident_id, m.expires_at, m.uuid
+        ],
+    )
+    .expect("failed to update synced message");
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapMarker {
     pub id: i64,
     pub label: String,
@@ -699,9 +757,8 @@ fn marker_from_row(row: &rusqlite::Row) -> rusqlite::Result<MapMarker> {
     })
 }
 
-#[tauri::command]
-pub fn get_markers(db: State<Db>) -> Vec<MapMarker> {
-    let conn = db.0.lock().expect("db mutex poisoned");
+/// Plain-`&Connection` form -- same reasoning as `get_messages_conn`.
+pub fn get_markers_conn(conn: &Connection) -> Vec<MapMarker> {
     let mut stmt = conn
         .prepare(&format!("SELECT {MARKER_COLUMNS} FROM map_markers ORDER BY created_at DESC"))
         .expect("failed to prepare markers query");
@@ -711,11 +768,24 @@ pub fn get_markers(db: State<Db>) -> Vec<MapMarker> {
         .collect()
 }
 
+#[tauri::command]
+pub fn get_markers(db: State<Db>) -> Vec<MapMarker> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_markers_conn(&conn)
+}
+
 /// Used by the dispatcher to re-fetch a single marker after an update.
 pub fn get_marker(conn: &Connection, id: i64) -> Option<MapMarker> {
     conn.query_row(&format!("SELECT {MARKER_COLUMNS} FROM map_markers WHERE id = ?1"), params![id], marker_from_row)
         .optional()
         .expect("failed to query marker")
+}
+
+/// Same reasoning as `get_message_by_uuid` -- sync.rs's identity.
+pub fn get_marker_by_uuid(conn: &Connection, uuid: &str) -> Option<MapMarker> {
+    conn.query_row(&format!("SELECT {MARKER_COLUMNS} FROM map_markers WHERE uuid = ?1"), params![uuid], marker_from_row)
+        .optional()
+        .expect("failed to query marker by uuid")
 }
 
 /// Every locally-created marker still sitting in 'queued' -- what the
@@ -804,6 +874,41 @@ pub fn insert_received_marker(
         params![label, marker_type, latitude, longitude, origin, now, hash, via, uuid, now],
     )
     .expect("failed to insert received marker");
+}
+
+/// Writes a marker that arrived from another WayStation instance via
+/// sync.rs. Distinct from `insert_received_marker` above: that one is
+/// for a marker heard live over a transport (dedupes by content_hash,
+/// always starts at revision 1), this one is adopting a specific
+/// already-existing object with its own uuid/revision from a peer's
+/// database wholesale -- same reasoning as `insert_synced_message` for
+/// why `trust_state` is forced rather than trusted from the wire.
+pub fn insert_synced_marker(conn: &Connection, m: &MapMarker) {
+    conn.execute(
+        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via, uuid, revision, updated_at, incident_id, expires_at, trust_state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'received')",
+        params![
+            m.label, m.marker_type, m.latitude, m.longitude, m.origin_station, m.to_station, m.created_at, m.content_hash,
+            m.dispatch_status, m.dispatched_via, m.received_via, m.uuid, m.revision, m.updated_at, m.incident_id, m.expires_at
+        ],
+    )
+    .expect("failed to insert synced marker");
+}
+
+/// Overwrites an existing marker (matched by uuid) with a newer
+/// revision that arrived via sync.
+pub fn update_synced_marker(conn: &Connection, m: &MapMarker) {
+    conn.execute(
+        "UPDATE map_markers SET label = ?1, marker_type = ?2, latitude = ?3, longitude = ?4, origin_station = ?5, to_station = ?6,
+         content_hash = ?7, dispatch_status = ?8, dispatched_via = ?9, received_via = ?10, revision = ?11, updated_at = ?12,
+         incident_id = ?13, expires_at = ?14, trust_state = 'received'
+         WHERE uuid = ?15",
+        params![
+            m.label, m.marker_type, m.latitude, m.longitude, m.origin_station, m.to_station, m.content_hash, m.dispatch_status,
+            m.dispatched_via, m.received_via, m.revision, m.updated_at, m.incident_id, m.expires_at, m.uuid
+        ],
+    )
+    .expect("failed to update synced marker");
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2424,10 +2529,17 @@ const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
+/// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
+/// instances can run on the same machine against two separate databases
+/// -- the real, honest way to prove the sync protocol (sync.rs) between
+/// "two stations" without needing two physical computers. Unset in
+/// normal single-instance use, where the real per-OS app-data directory
+/// is exactly right.
 pub fn data_dir() -> PathBuf {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("waystation");
+    let dir = match std::env::var("WAYSTATION_DATA_DIR") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("waystation"),
+    };
     std::fs::create_dir_all(&dir).expect("failed to create app data directory");
     dir
 }
@@ -2479,7 +2591,10 @@ fn backfill_object_uuids(conn: &Connection) {
 /// each migration in its own transaction makes that interruption point
 /// impossible: a kill mid-migration now leaves `user_version` unchanged
 /// and the schema untouched, so the next launch just retries cleanly.
-fn migrate(conn: &mut Connection) {
+// pub(crate), not private: sync.rs's tests need a real, fully-migrated
+// database to prove reconciliation against -- not a mock, the actual
+// schema every other test in this file also runs against.
+pub(crate) fn migrate(conn: &mut Connection) {
     apply_migrations(conn, MIGRATIONS);
 }
 
