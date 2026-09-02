@@ -6,6 +6,7 @@ import AlertsPanel from "./AlertsPanel";
 import NetControlPanel from "./NetControlPanel";
 import MessagesPanel from "./MessagesPanel";
 import IncidentInfoPanel from "./IncidentInfoPanel";
+import IncidentsPanel from "./IncidentsPanel";
 import TacticalMapPanel from "./TacticalMapPanel";
 import ResourcesPanel from "./ResourcesPanel";
 import ReadinessPanel from "./ReadinessPanel";
@@ -88,6 +89,17 @@ registerPanel({
   width: "full",
   height: "natural",
   component: IncidentInfoPanel,
+});
+
+registerPanel({
+  id: "incidents",
+  title: "Incidents",
+  category: "emcomm",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "always-available",
+  width: "wide",
+  height: "natural",
+  component: IncidentsPanel,
 });
 
 registerPanel({

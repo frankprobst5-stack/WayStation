@@ -282,6 +282,148 @@ pub fn save_incident_info(
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Incident {
+    pub id: i64,
+    pub uuid: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub closed_at: Option<String>,
+    pub revision: i64,
+    pub trust_state: String,
+}
+
+const INCIDENT_COLUMNS: &str = "id, uuid, name, description, status, created_at, updated_at, closed_at, revision, trust_state";
+
+fn incident_from_row(row: &rusqlite::Row) -> rusqlite::Result<Incident> {
+    Ok(Incident {
+        id: row.get(0)?,
+        uuid: row.get(1)?,
+        name: row.get(2)?,
+        description: row.get(3)?,
+        status: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        closed_at: row.get(7)?,
+        revision: row.get(8)?,
+        trust_state: row.get(9)?,
+    })
+}
+
+fn create_incident_conn(conn: &Connection, name: String, description: Option<String>) -> Incident {
+    let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO incidents (uuid, name, description, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'active', ?4, ?4)",
+        params![uuid, name, description, now],
+    )
+    .expect("failed to create incident");
+    let id = conn.last_insert_rowid();
+    Incident { id, uuid, name, description, status: "active".to_string(), created_at: now.clone(), updated_at: now, closed_at: None, revision: 1, trust_state: "local".to_string() }
+}
+
+#[tauri::command]
+pub fn create_incident(db: State<Db>, name: String, description: Option<String>) -> Incident {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    create_incident_conn(&conn, name, description)
+}
+
+/// Active first (what an operator opening this panel almost always
+/// wants), most recently updated within each group next.
+fn get_incidents_conn(conn: &Connection) -> Vec<Incident> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {INCIDENT_COLUMNS} FROM incidents ORDER BY (status = 'active') DESC, updated_at DESC"
+        ))
+        .expect("failed to prepare incidents query");
+    stmt.query_map([], incident_from_row)
+        .expect("failed to query incidents")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_incidents(db: State<Db>) -> Vec<Incident> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_incidents_conn(&conn)
+}
+
+/// Closing is the real lifecycle transition for an incident -- there's
+/// no `expires_at` on this object (see the v32 migration comment for
+/// why); this is how "this incident is over" actually gets recorded.
+/// Reopening isn't exposed yet -- a real "closed by mistake" recovery
+/// path is a reasonable future addition, not something this first slice
+/// needs to solve.
+fn close_incident_conn(conn: &Connection, incident_id: i64) -> Result<Incident, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE incidents SET status = 'closed', closed_at = ?1, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
+        params![now, incident_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {INCIDENT_COLUMNS} FROM incidents WHERE id = ?1"), params![incident_id], incident_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "incident vanished immediately after closing".to_string())
+}
+
+#[tauri::command]
+pub fn close_incident(db: State<Db>, incident_id: i64) -> Result<Incident, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    close_incident_conn(&conn, incident_id)
+}
+
+fn get_incident_by_uuid(conn: &Connection, uuid: &str) -> Option<Incident> {
+    conn.query_row(&format!("SELECT {INCIDENT_COLUMNS} FROM incidents WHERE uuid = ?1"), params![uuid], incident_from_row)
+        .optional()
+        .expect("failed to query incident by uuid")
+}
+
+/// Tags an existing message with an incident -- or clears the tag when
+/// `incident_id` is None. Stores the incident's *uuid*, matching
+/// `messages.incident_id`'s shape since v30: the stable identity that
+/// keeps meaning the same thing once more than one station's database
+/// exists, never the local integer id. Rejects an unknown uuid rather
+/// than silently writing a dangling reference -- a message pointing at
+/// an incident that doesn't exist would be a real, confusing data
+/// problem, not something to let slide.
+fn set_message_incident_conn(conn: &Connection, message_id: i64, incident_id: Option<String>) -> Result<Message, String> {
+    if let Some(uuid) = &incident_id {
+        get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE messages SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![incident_id, now, message_id])
+        .map_err(|e| e.to_string())?;
+    get_message(conn, message_id).ok_or_else(|| "message not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_message_incident(db: State<Db>, message_id: i64, incident_id: Option<String>) -> Result<Message, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_message_incident_conn(&conn, message_id, incident_id)
+}
+
+/// Same reasoning as `set_message_incident_conn`, for map markers.
+fn set_marker_incident_conn(conn: &Connection, marker_id: i64, incident_id: Option<String>) -> Result<MapMarker, String> {
+    if let Some(uuid) = &incident_id {
+        get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE map_markers SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![incident_id, now, marker_id])
+        .map_err(|e| e.to_string())?;
+    get_marker(conn, marker_id).ok_or_else(|| "marker not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_marker_incident(db: State<Db>, marker_id: i64, incident_id: Option<String>) -> Result<MapMarker, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_marker_incident_conn(&conn, marker_id, incident_id)
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Alert {
     pub id: String,
     pub fetched_at: String,
@@ -2527,6 +2669,34 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_delivery_attempts_object ON delivery_attempts(object_uuid, attempted_at);
     "#,
+    // v32: real multi-incident lifecycle, decided 2026-09-02 -- Phase D's
+    // first slice. Deliberately separate from `incident_info` (v24),
+    // which stays exactly as it is: a singleton quick-glance "current
+    // situation" card (name/operational period/net frequency/status),
+    // still a real and useful thing, just not the same concept as this.
+    // This table is what `messages.incident_id`/`map_markers.incident_id`
+    // (added in v30, unused until now) actually reference -- a real
+    // object with its own identity and lifecycle that other objects can
+    // be tagged against. Carries uuid/revision/updated_at/trust_state
+    // like every other canonical object (see v30's comment for why),
+    // but deliberately *not* incident_id or expires_at -- an incident
+    // isn't part of a parent incident, and "expiring" one doesn't fit
+    // its lifecycle the way it fits a message; closing it is the real
+    // transition, which is what `status`/`closed_at` model.
+    r#"
+    CREATE TABLE incidents (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid         TEXT NOT NULL UNIQUE,
+        name         TEXT NOT NULL,
+        description  TEXT,
+        status       TEXT NOT NULL CHECK (status IN ('active', 'closed')) DEFAULT 'active',
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        closed_at    TEXT,
+        revision     INTEGER NOT NULL DEFAULT 1,
+        trust_state  TEXT NOT NULL DEFAULT 'local'
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -2830,5 +3000,86 @@ mod tests {
         assert_eq!(delivery_attempts_for(&conn, "uuid-a").len(), 1);
         assert_eq!(delivery_attempts_for(&conn, "uuid-b").len(), 1);
         assert_eq!(delivery_attempts_for(&conn, "uuid-nonexistent").len(), 0);
+    }
+
+    #[test]
+    fn incident_lifecycle_create_then_close() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Panhandle Severe Weather".to_string(), Some("Tornado watch, county-wide".to_string()));
+        assert_eq!(incident.status, "active");
+        assert_eq!(incident.revision, 1);
+        assert!(incident.closed_at.is_none());
+
+        let closed = close_incident_conn(&conn, incident.id).expect("closing an existing incident should succeed");
+        assert_eq!(closed.status, "closed");
+        assert_eq!(closed.revision, 2, "closing must bump revision -- it's a real edit, not a no-op");
+        assert!(closed.closed_at.is_some());
+        // uuid survives the transition unchanged -- closing is not the
+        // same thing as replacing the object.
+        assert_eq!(closed.uuid, incident.uuid);
+    }
+
+    #[test]
+    fn closing_an_unknown_incident_fails_clearly() {
+        let conn = fresh_db();
+        let err = close_incident_conn(&conn, 999).expect_err("closing a nonexistent incident must not silently succeed");
+        assert!(err.contains("vanished") || err.contains("no such") || !err.is_empty());
+    }
+
+    #[test]
+    fn get_incidents_lists_active_before_closed() {
+        let conn = fresh_db();
+        let a = create_incident_conn(&conn, "Older, still active".to_string(), None);
+        let b = create_incident_conn(&conn, "Will be closed".to_string(), None);
+        close_incident_conn(&conn, b.id).unwrap();
+        let c = create_incident_conn(&conn, "Newest, active".to_string(), None);
+
+        let listed = get_incidents_conn(&conn);
+        assert_eq!(listed.len(), 3);
+        // Both active incidents sort before the closed one, regardless
+        // of creation order -- an operator opening this panel is looking
+        // for what's still open, not a chronological log.
+        let statuses: Vec<&str> = listed.iter().map(|i| i.status.as_str()).collect();
+        assert_eq!(statuses, vec!["active", "active", "closed"]);
+        let active_uuids: Vec<&str> = listed.iter().filter(|i| i.status == "active").map(|i| i.uuid.as_str()).collect();
+        assert!(active_uuids.contains(&a.uuid.as_str()));
+        assert!(active_uuids.contains(&c.uuid.as_str()));
+    }
+
+    #[test]
+    fn tagging_a_message_with_a_real_incident_succeeds_and_reads_back() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        conn.execute(
+            "INSERT INTO messages (precedence, date_time, message_text, uuid, updated_at, trust_state) VALUES ('routine', '2026-09-02T00:00:00Z', 'test', 'msg-uuid-1', '2026-09-02T00:00:00Z', 'local')",
+            [],
+        )
+        .unwrap();
+        let message_id = conn.last_insert_rowid();
+
+        let tagged = set_message_incident_conn(&conn, message_id, Some(incident.uuid.clone())).expect("tagging with a real incident must succeed");
+        assert_eq!(tagged.incident_id.as_deref(), Some(incident.uuid.as_str()));
+
+        // Clearing the tag (None) must also work, not just setting one.
+        let cleared = set_message_incident_conn(&conn, message_id, None).expect("clearing the tag must succeed");
+        assert!(cleared.incident_id.is_none());
+    }
+
+    #[test]
+    fn tagging_a_message_with_an_unknown_incident_uuid_is_rejected() {
+        let conn = fresh_db();
+        conn.execute(
+            "INSERT INTO messages (precedence, date_time, message_text, uuid, updated_at, trust_state) VALUES ('routine', '2026-09-02T00:00:00Z', 'test', 'msg-uuid-2', '2026-09-02T00:00:00Z', 'local')",
+            [],
+        )
+        .unwrap();
+        let message_id = conn.last_insert_rowid();
+
+        let err = set_message_incident_conn(&conn, message_id, Some("does-not-exist".to_string()))
+            .expect_err("a dangling incident reference must be rejected, not silently written");
+        assert!(err.contains("does-not-exist"));
+
+        // And the message itself must be untouched by the rejected attempt.
+        assert!(get_message(&conn, message_id).unwrap().incident_id.is_none());
     }
 }
