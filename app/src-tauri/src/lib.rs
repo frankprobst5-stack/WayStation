@@ -131,6 +131,7 @@ pub fn run() {
             sync::manifest_diff_from_file,
             sync::export_objects_to_file,
             sync::import_objects_from_file,
+            sync::export_full_bundle_to_file,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

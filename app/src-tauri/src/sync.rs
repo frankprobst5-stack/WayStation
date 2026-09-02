@@ -232,6 +232,32 @@ pub fn import_objects_from_file(db: tauri::State<db::Db>, path: String) -> Resul
     Ok(merge_incoming(&conn, objects))
 }
 
+// -- Combined single-file exchange --------------------------------------
+//
+// The four granular commands above are the real protocol (manifest ->
+// diff -> selective fetch -> merge), and matter for a bandwidth-
+// constrained transport where sending objects the peer already has is
+// real, meaningful waste. Over a file exchange there's no such
+// constraint, and `merge_incoming` already safely no-ops on anything
+// the receiving side doesn't actually need (see its own doc comment) --
+// so skipping straight to "export everything, let merge sort out what's
+// actually new" is not a shortcut around correctness, just a UI that
+// doesn't force an operator through a multi-file round trip to prove
+// the same thing the granular path already proves in the test suite.
+// Import re-uses `import_objects_from_file` above unchanged -- a full
+// bundle is just a `Vec<SyncObject>` like any other, no separate import
+// path needed.
+#[tauri::command]
+pub fn export_full_bundle_to_file(db: tauri::State<db::Db>, path: String) -> Result<usize, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let manifest = export_manifest(&conn);
+    let objects = export_objects(&conn, &manifest);
+    let count = objects.len();
+    let json = serde_json::to_string_pretty(&objects).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     //! Real risk this protects against: it's easy to write reconciliation

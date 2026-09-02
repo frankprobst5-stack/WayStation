@@ -34,6 +34,7 @@ import UserManualPanel from "./UserManualPanel";
 import SatellitePanel from "./SatellitePanel";
 import QsoLogPanel from "./QsoLogPanel";
 import MeshPanel from "./MeshPanel";
+import SyncPanel from "./SyncPanel";
 
 registerPanel({
   id: "world-map",
@@ -388,6 +389,17 @@ registerPanel({
   width: "wide",
   height: "natural",
   component: DiagnosticsPanel,
+});
+
+registerPanel({
+  id: "sync",
+  title: "Peer Sync",
+  category: "settings",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "always-available",
+  width: "wide",
+  height: "natural",
+  component: SyncPanel,
 });
 
 registerPanel({
