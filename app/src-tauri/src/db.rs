@@ -557,6 +557,192 @@ pub fn assign_person_to_incident(db: State<Db>, person_id: i64, incident_id: Opt
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ResourceRequest {
+    pub id: i64,
+    pub uuid: String,
+    pub incident_id: Option<String>,
+    pub resource_type: String,
+    pub description: Option<String>,
+    pub quantity: Option<String>,
+    pub location: Option<String>,
+    pub priority: String,
+    pub status: String,
+    pub requested_by: Option<String>,
+    pub needed_by: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub fulfilled_at: Option<String>,
+    pub revision: i64,
+    pub trust_state: String,
+}
+
+const RESOURCE_REQUEST_COLUMNS: &str =
+    "id, uuid, incident_id, resource_type, description, quantity, location, priority, status, requested_by, needed_by, created_at, updated_at, fulfilled_at, revision, trust_state";
+
+fn resource_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<ResourceRequest> {
+    Ok(ResourceRequest {
+        id: row.get(0)?,
+        uuid: row.get(1)?,
+        incident_id: row.get(2)?,
+        resource_type: row.get(3)?,
+        description: row.get(4)?,
+        quantity: row.get(5)?,
+        location: row.get(6)?,
+        priority: row.get(7)?,
+        status: row.get(8)?,
+        requested_by: row.get(9)?,
+        needed_by: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        fulfilled_at: row.get(13)?,
+        revision: row.get(14)?,
+        trust_state: row.get(15)?,
+    })
+}
+
+const RESOURCE_REQUEST_PRIORITIES: &[&str] = &["routine", "priority", "immediate", "emergency"];
+
+#[allow(clippy::too_many_arguments)]
+fn create_resource_request_conn(
+    conn: &Connection,
+    incident_id: Option<String>,
+    resource_type: String,
+    description: Option<String>,
+    quantity: Option<String>,
+    location: Option<String>,
+    priority: String,
+    requested_by: Option<String>,
+    needed_by: Option<String>,
+) -> Result<ResourceRequest, String> {
+    if !RESOURCE_REQUEST_PRIORITIES.contains(&priority.as_str()) {
+        return Err(format!("unknown priority '{priority}' -- must be one of {RESOURCE_REQUEST_PRIORITIES:?}"));
+    }
+    if let Some(uuid) = &incident_id {
+        get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO resource_requests (uuid, incident_id, resource_type, description, quantity, location, priority, status, requested_by, needed_by, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'requested', ?8, ?9, ?10, ?10)",
+        params![uuid, incident_id, resource_type, description, quantity, location, priority, requested_by, needed_by, now],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    Ok(ResourceRequest {
+        id,
+        uuid,
+        incident_id,
+        resource_type,
+        description,
+        quantity,
+        location,
+        priority,
+        status: "requested".to_string(),
+        requested_by,
+        needed_by,
+        created_at: now.clone(),
+        updated_at: now,
+        fulfilled_at: None,
+        revision: 1,
+        trust_state: "local".to_string(),
+    })
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn create_resource_request(
+    db: State<Db>,
+    incident_id: Option<String>,
+    resource_type: String,
+    description: Option<String>,
+    quantity: Option<String>,
+    location: Option<String>,
+    priority: String,
+    requested_by: Option<String>,
+    needed_by: Option<String>,
+) -> Result<ResourceRequest, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    create_resource_request_conn(&conn, incident_id, resource_type, description, quantity, location, priority, requested_by, needed_by)
+}
+
+/// Open requests (anything short of fulfilled/cancelled) before closed
+/// ones, most urgent priority first within each group -- an operator
+/// scanning this panel is looking for what still needs action.
+fn get_resource_requests_conn(conn: &Connection) -> Vec<ResourceRequest> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests
+             ORDER BY (status NOT IN ('fulfilled', 'cancelled')) DESC,
+                      CASE priority WHEN 'emergency' THEN 0 WHEN 'immediate' THEN 1 WHEN 'priority' THEN 2 ELSE 3 END ASC,
+                      created_at ASC"
+        ))
+        .expect("failed to prepare resource_requests query");
+    stmt.query_map([], resource_request_from_row)
+        .expect("failed to query resource_requests")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_resource_requests(db: State<Db>) -> Vec<ResourceRequest> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_resource_requests_conn(&conn)
+}
+
+const RESOURCE_REQUEST_STATUSES: &[&str] = &["requested", "acknowledged", "in_progress", "fulfilled", "cancelled"];
+
+/// Setting status to `'fulfilled'` stamps `fulfilled_at` -- any other
+/// status clears it, so a request bounced back from "fulfilled" to
+/// "in_progress" (a real thing: turns out that generator wasn't
+/// actually working) doesn't leave a stale fulfillment timestamp lying
+/// around contradicting its own current status.
+fn set_resource_request_status_conn(conn: &Connection, request_id: i64, status: String) -> Result<ResourceRequest, String> {
+    if !RESOURCE_REQUEST_STATUSES.contains(&status.as_str()) {
+        return Err(format!("unknown status '{status}' -- must be one of {RESOURCE_REQUEST_STATUSES:?}"));
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let fulfilled_at = if status == "fulfilled" { Some(now.clone()) } else { None };
+    conn.execute(
+        "UPDATE resource_requests SET status = ?1, fulfilled_at = ?2, updated_at = ?3, revision = revision + 1 WHERE id = ?4",
+        params![status, fulfilled_at, now, request_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "resource request not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_resource_request_status(db: State<Db>, request_id: i64, status: String) -> Result<ResourceRequest, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_resource_request_status_conn(&conn, request_id, status)
+}
+
+fn set_resource_request_incident_conn(conn: &Connection, request_id: i64, incident_id: Option<String>) -> Result<ResourceRequest, String> {
+    if let Some(uuid) = &incident_id {
+        get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE resource_requests SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3",
+        params![incident_id, now, request_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "resource request not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_resource_request_incident(db: State<Db>, request_id: i64, incident_id: Option<String>) -> Result<ResourceRequest, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_resource_request_incident_conn(&conn, request_id, incident_id)
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Alert {
     pub id: String,
     pub fetched_at: String,
@@ -2859,6 +3045,41 @@ const MIGRATIONS: &[&str] = &[
         trust_state  TEXT NOT NULL DEFAULT 'local'
     );
     "#,
+    // v34: structured resource requests, Phase D slice 3, decided
+    // 2026-09-02. Deliberately a separate object from the existing
+    // `resources` table (v4, the bracket-token status board -- "[Beds
+    // 30/100][Power OK]") -- that one is a passive current-status
+    // display, this one is an active *request for something needed*
+    // with a real fulfillment lifecycle, matching the roadmap's own
+    // language ("needs, ownership, priority, and fulfillment"). Reuses
+    // `messages.precedence`'s exact vocabulary (routine/priority/
+    // immediate/emergency) for `priority` rather than inventing a
+    // second one -- same concept, same words. `resource_type` is free
+    // text, not a CHECK-constrained enum, same precedent as
+    // `map_markers.marker_type`: the real list (fuel, medical, food,
+    // water, generators, transportation, shelter beds, ...) is open-
+    // ended and a fixed list would just be wrong the first time someone
+    // needs something not on it.
+    r#"
+    CREATE TABLE resource_requests (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid          TEXT NOT NULL UNIQUE,
+        incident_id   TEXT,
+        resource_type TEXT NOT NULL,
+        description   TEXT,
+        quantity      TEXT,
+        location      TEXT,
+        priority      TEXT NOT NULL CHECK (priority IN ('routine','priority','immediate','emergency')) DEFAULT 'routine',
+        status        TEXT NOT NULL CHECK (status IN ('requested','acknowledged','in_progress','fulfilled','cancelled')) DEFAULT 'requested',
+        requested_by  TEXT,
+        needed_by     TEXT,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        fulfilled_at  TEXT,
+        revision      INTEGER NOT NULL DEFAULT 1,
+        trust_state   TEXT NOT NULL DEFAULT 'local'
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -3314,5 +3535,84 @@ mod tests {
         // beats alphabetical order.
         let names: Vec<&str> = listed.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["Amy OnScene", "Zed Available"]);
+    }
+
+    #[test]
+    fn resource_request_defaults_to_requested_with_no_fulfillment() {
+        let conn = fresh_db();
+        let req = create_resource_request_conn(&conn, None, "fuel".to_string(), Some("generator diesel".to_string()), Some("40 gallons".to_string()), Some("Shelter 3".to_string()), "priority".to_string(), Some("KJ4ESQ".to_string()), None)
+            .expect("a well-formed request should be created");
+        assert_eq!(req.status, "requested");
+        assert!(req.fulfilled_at.is_none());
+        assert_eq!(req.revision, 1);
+    }
+
+    #[test]
+    fn create_resource_request_rejects_unknown_priority() {
+        let conn = fresh_db();
+        let err = create_resource_request_conn(&conn, None, "fuel".to_string(), None, None, None, "whenever-i-guess".to_string(), None, None)
+            .expect_err("an unrecognized priority must be rejected");
+        assert!(err.contains("whenever-i-guess"));
+    }
+
+    #[test]
+    fn create_resource_request_rejects_unknown_incident() {
+        let conn = fresh_db();
+        let err = create_resource_request_conn(&conn, Some("does-not-exist".to_string()), "fuel".to_string(), None, None, None, "routine".to_string(), None, None)
+            .expect_err("a dangling incident reference must be rejected");
+        assert!(err.contains("does-not-exist"));
+    }
+
+    #[test]
+    fn fulfilling_a_request_stamps_fulfilled_at_and_reverting_clears_it() {
+        let conn = fresh_db();
+        let req = create_resource_request_conn(&conn, None, "medical".to_string(), None, None, None, "immediate".to_string(), None, None).unwrap();
+
+        let fulfilled = set_resource_request_status_conn(&conn, req.id, "fulfilled".to_string()).expect("fulfilling should succeed");
+        assert!(fulfilled.fulfilled_at.is_some());
+
+        // Turns out it wasn't actually fulfilled -- bounced back to
+        // in_progress must not leave a stale fulfilled_at contradicting
+        // the current status.
+        let reverted = set_resource_request_status_conn(&conn, req.id, "in_progress".to_string()).expect("reverting should succeed");
+        assert!(reverted.fulfilled_at.is_none());
+        assert_eq!(reverted.revision, 3);
+    }
+
+    #[test]
+    fn set_resource_request_status_rejects_unknown_status() {
+        let conn = fresh_db();
+        let req = create_resource_request_conn(&conn, None, "water".to_string(), None, None, None, "routine".to_string(), None, None).unwrap();
+        let err = set_resource_request_status_conn(&conn, req.id, "maybe-later".to_string()).expect_err("an unrecognized status must be rejected");
+        assert!(err.contains("maybe-later"));
+    }
+
+    #[test]
+    fn get_resource_requests_sorts_open_before_closed_and_by_priority_within_each() {
+        let conn = fresh_db();
+        create_resource_request_conn(&conn, None, "tarps".to_string(), None, None, None, "routine".to_string(), None, None).unwrap();
+        create_resource_request_conn(&conn, None, "medical".to_string(), None, None, None, "emergency".to_string(), None, None).unwrap();
+        let fulfilled_emergency =
+            create_resource_request_conn(&conn, None, "already done".to_string(), None, None, None, "emergency".to_string(), None, None).unwrap();
+        set_resource_request_status_conn(&conn, fulfilled_emergency.id, "fulfilled".to_string()).unwrap();
+
+        let listed = get_resource_requests_conn(&conn);
+        let types: Vec<&str> = listed.iter().map(|r| r.resource_type.as_str()).collect();
+        // Both open requests sort before the fulfilled one regardless of
+        // priority, and within the open group, emergency beats routine.
+        assert_eq!(types, vec!["medical", "tarps", "already done"]);
+    }
+
+    #[test]
+    fn set_resource_request_incident_can_assign_and_clear() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        let req = create_resource_request_conn(&conn, None, "food".to_string(), None, None, None, "routine".to_string(), None, None).unwrap();
+
+        let assigned = set_resource_request_incident_conn(&conn, req.id, Some(incident.uuid.clone())).expect("assigning to a real incident should succeed");
+        assert_eq!(assigned.incident_id.as_deref(), Some(incident.uuid.as_str()));
+
+        let cleared = set_resource_request_incident_conn(&conn, req.id, None).expect("clearing should succeed");
+        assert!(cleared.incident_id.is_none());
     }
 }

@@ -8,6 +8,7 @@ import MessagesPanel from "./MessagesPanel";
 import IncidentInfoPanel from "./IncidentInfoPanel";
 import IncidentsPanel from "./IncidentsPanel";
 import PersonnelPanel from "./PersonnelPanel";
+import ResourceRequestsPanel from "./ResourceRequestsPanel";
 import TacticalMapPanel from "./TacticalMapPanel";
 import ResourcesPanel from "./ResourcesPanel";
 import ReadinessPanel from "./ReadinessPanel";
@@ -112,6 +113,17 @@ registerPanel({
   width: "wide",
   height: "natural",
   component: PersonnelPanel,
+});
+
+registerPanel({
+  id: "resource-requests",
+  title: "Resource Requests",
+  category: "emcomm",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "always-available",
+  width: "wide",
+  height: "natural",
+  component: ResourceRequestsPanel,
 });
 
 registerPanel({
