@@ -322,6 +322,7 @@ fn create_incident_conn(conn: &Connection, name: String, description: Option<Str
     )
     .expect("failed to create incident");
     let id = conn.last_insert_rowid();
+    record_incident_event(conn, &uuid, "incident_declared", Some("incident"), Some(&uuid), &format!("Incident declared: {name}"));
     Incident { id, uuid, name, description, status: "active".to_string(), created_at: now.clone(), updated_at: now, closed_at: None, revision: 1, trust_state: "local".to_string() }
 }
 
@@ -364,10 +365,13 @@ fn close_incident_conn(conn: &Connection, incident_id: i64) -> Result<Incident, 
         params![now, incident_id],
     )
     .map_err(|e| e.to_string())?;
-    conn.query_row(&format!("SELECT {INCIDENT_COLUMNS} FROM incidents WHERE id = ?1"), params![incident_id], incident_from_row)
+    let closed = conn
+        .query_row(&format!("SELECT {INCIDENT_COLUMNS} FROM incidents WHERE id = ?1"), params![incident_id], incident_from_row)
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "incident vanished immediately after closing".to_string())
+        .ok_or_else(|| "incident vanished immediately after closing".to_string())?;
+    record_incident_event(conn, &closed.uuid, "incident_closed", Some("incident"), Some(&closed.uuid), "Incident closed");
+    Ok(closed)
 }
 
 #[tauri::command]
@@ -394,10 +398,23 @@ fn set_message_incident_conn(conn: &Connection, message_id: i64, incident_id: Op
     if let Some(uuid) = &incident_id {
         get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
     }
+    let previous_incident = get_message(conn, message_id).and_then(|m| m.incident_id);
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute("UPDATE messages SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![incident_id, now, message_id])
         .map_err(|e| e.to_string())?;
-    get_message(conn, message_id).ok_or_else(|| "message not found".to_string())
+    let updated = get_message(conn, message_id).ok_or_else(|| "message not found".to_string())?;
+    let subject = updated.subject.as_deref().unwrap_or("(no subject)");
+    if let Some(new_incident) = &incident_id {
+        if previous_incident.as_deref() != Some(new_incident.as_str()) {
+            record_incident_event(conn, new_incident, "message_tagged", Some("message"), Some(&updated.uuid), &format!("Message tagged: {subject}"));
+        }
+    }
+    if let Some(old_incident) = &previous_incident {
+        if incident_id.as_deref() != Some(old_incident.as_str()) {
+            record_incident_event(conn, old_incident, "message_untagged", Some("message"), Some(&updated.uuid), &format!("Message removed from incident: {subject}"));
+        }
+    }
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -411,10 +428,22 @@ fn set_marker_incident_conn(conn: &Connection, marker_id: i64, incident_id: Opti
     if let Some(uuid) = &incident_id {
         get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
     }
+    let previous_incident = get_marker(conn, marker_id).and_then(|m| m.incident_id);
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute("UPDATE map_markers SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![incident_id, now, marker_id])
         .map_err(|e| e.to_string())?;
-    get_marker(conn, marker_id).ok_or_else(|| "marker not found".to_string())
+    let updated = get_marker(conn, marker_id).ok_or_else(|| "marker not found".to_string())?;
+    if let Some(new_incident) = &incident_id {
+        if previous_incident.as_deref() != Some(new_incident.as_str()) {
+            record_incident_event(conn, new_incident, "marker_tagged", Some("marker"), Some(&updated.uuid), &format!("Map marker tagged: {}", updated.label));
+        }
+    }
+    if let Some(old_incident) = &previous_incident {
+        if incident_id.as_deref() != Some(old_incident.as_str()) {
+            record_incident_event(conn, old_incident, "marker_untagged", Some("marker"), Some(&updated.uuid), &format!("Map marker removed from incident: {}", updated.label));
+        }
+    }
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -520,10 +549,18 @@ fn set_person_status_conn(conn: &Connection, person_id: i64, status: String) -> 
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute("UPDATE personnel SET status = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![status, now, person_id])
         .map_err(|e| e.to_string())?;
-    conn.query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
+    let updated = conn
+        .query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "person not found".to_string())
+        .ok_or_else(|| "person not found".to_string())?;
+    // Only worth logging against a timeline that exists -- a status
+    // change on someone not currently assigned to any incident has
+    // nowhere to attach the event.
+    if let Some(incident) = &updated.incident_id {
+        record_incident_event(conn, incident, "person_status_changed", Some("person"), Some(&updated.uuid), &format!("{} status changed to {status}", updated.name));
+    }
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -541,13 +578,30 @@ fn assign_person_to_incident_conn(conn: &Connection, person_id: i64, incident_id
     if let Some(uuid) = &incident_id {
         get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
     }
+    let previous_incident = conn
+        .query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .and_then(|p| p.incident_id);
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute("UPDATE personnel SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![incident_id, now, person_id])
         .map_err(|e| e.to_string())?;
-    conn.query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
+    let updated = conn
+        .query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "person not found".to_string())
+        .ok_or_else(|| "person not found".to_string())?;
+    if let Some(new_incident) = &incident_id {
+        if previous_incident.as_deref() != Some(new_incident.as_str()) {
+            record_incident_event(conn, new_incident, "person_assigned", Some("person"), Some(&updated.uuid), &format!("{} assigned", updated.name));
+        }
+    }
+    if let Some(old_incident) = &previous_incident {
+        if incident_id.as_deref() != Some(old_incident.as_str()) {
+            record_incident_event(conn, old_incident, "person_unassigned", Some("person"), Some(&updated.uuid), &format!("{} unassigned", updated.name));
+        }
+    }
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -629,6 +683,9 @@ fn create_resource_request_conn(
     )
     .map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
+    if let Some(incident) = &incident_id {
+        record_incident_event(conn, incident, "resource_requested", Some("resource_request"), Some(&uuid), &format!("Resource requested: {resource_type}"));
+    }
     Ok(ResourceRequest {
         id,
         uuid,
@@ -708,10 +765,22 @@ fn set_resource_request_status_conn(conn: &Connection, request_id: i64, status: 
         params![status, fulfilled_at, now, request_id],
     )
     .map_err(|e| e.to_string())?;
-    conn.query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
+    let updated = conn
+        .query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "resource request not found".to_string())
+        .ok_or_else(|| "resource request not found".to_string())?;
+    if let Some(incident) = &updated.incident_id {
+        record_incident_event(
+            conn,
+            incident,
+            "resource_status_changed",
+            Some("resource_request"),
+            Some(&updated.uuid),
+            &format!("{} status changed to {status}", updated.resource_type),
+        );
+    }
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -724,22 +793,94 @@ fn set_resource_request_incident_conn(conn: &Connection, request_id: i64, incide
     if let Some(uuid) = &incident_id {
         get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
     }
+    let previous_incident = conn
+        .query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .and_then(|r| r.incident_id);
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE resource_requests SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3",
         params![incident_id, now, request_id],
     )
     .map_err(|e| e.to_string())?;
-    conn.query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
+    let updated = conn
+        .query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "resource request not found".to_string())
+        .ok_or_else(|| "resource request not found".to_string())?;
+    if let Some(new_incident) = &incident_id {
+        if previous_incident.as_deref() != Some(new_incident.as_str()) {
+            record_incident_event(conn, new_incident, "resource_request_tagged", Some("resource_request"), Some(&updated.uuid), &format!("Resource request tagged: {}", updated.resource_type));
+        }
+    }
+    if let Some(old_incident) = &previous_incident {
+        if incident_id.as_deref() != Some(old_incident.as_str()) {
+            record_incident_event(conn, old_incident, "resource_request_untagged", Some("resource_request"), Some(&updated.uuid), &format!("Resource request removed from incident: {}", updated.resource_type));
+        }
+    }
+    Ok(updated)
 }
 
 #[tauri::command]
 pub fn set_resource_request_incident(db: State<Db>, request_id: i64, incident_id: Option<String>) -> Result<ResourceRequest, String> {
     let conn = db.0.lock().expect("db mutex poisoned");
     set_resource_request_incident_conn(&conn, request_id, incident_id)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IncidentEvent {
+    pub id: i64,
+    pub incident_id: String,
+    pub event_type: String,
+    pub object_type: Option<String>,
+    pub object_uuid: Option<String>,
+    pub summary: String,
+    pub occurred_at: String,
+}
+
+fn incident_event_from_row(row: &rusqlite::Row) -> rusqlite::Result<IncidentEvent> {
+    Ok(IncidentEvent {
+        id: row.get(0)?,
+        incident_id: row.get(1)?,
+        event_type: row.get(2)?,
+        object_type: row.get(3)?,
+        object_uuid: row.get(4)?,
+        summary: row.get(5)?,
+        occurred_at: row.get(6)?,
+    })
+}
+
+/// The one write path every incident-touching command below calls
+/// through -- generalizes the exact pattern `record_delivery_attempt`
+/// already proved for transport attempts (see the v31 migration).
+/// `object_type`/`object_uuid` are `None` for incident-level events
+/// (declared/closed) that aren't about a specific child object.
+fn record_incident_event(conn: &Connection, incident_id: &str, event_type: &str, object_type: Option<&str>, object_uuid: Option<&str>, summary: &str) {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO incident_events (incident_id, event_type, object_type, object_uuid, summary, occurred_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![incident_id, event_type, object_type, object_uuid, summary, now],
+    )
+    .expect("failed to record incident event");
+}
+
+/// Oldest first -- a timeline reads top-to-bottom as "what happened,
+/// in order," not most-recent-first like a notification feed.
+fn get_incident_events_conn(conn: &Connection, incident_id: &str) -> Vec<IncidentEvent> {
+    let mut stmt = conn
+        .prepare("SELECT id, incident_id, event_type, object_type, object_uuid, summary, occurred_at FROM incident_events WHERE incident_id = ?1 ORDER BY id ASC")
+        .expect("failed to prepare incident_events query");
+    stmt.query_map(params![incident_id], incident_event_from_row)
+        .expect("failed to query incident_events")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_incident_events(db: State<Db>, incident_id: String) -> Vec<IncidentEvent> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_incident_events_conn(&conn, &incident_id)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3080,6 +3221,30 @@ const MIGRATIONS: &[&str] = &[
         trust_state   TEXT NOT NULL DEFAULT 'local'
     );
     "#,
+    // v35: incident operational timeline, Phase D slice 4, decided
+    // 2026-09-02. Generalizes the exact pattern `delivery_attempts`
+    // (v31) already proved: a real event log, not an inference from
+    // scattered `updated_at` columns across incidents/personnel/
+    // resource_requests, which can show *that* something changed but
+    // not *what* or in what order relative to everything else tied to
+    // the same incident. `incident_id` is required (unlike the other
+    // object types' optional one) -- a timeline only exists in the
+    // context of a declared incident, that's the whole point of this
+    // table. `object_type`/`object_uuid` are nullable for incident-
+    // level events (declared/closed) that aren't about a specific
+    // child object.
+    r#"
+    CREATE TABLE incident_events (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident_id TEXT NOT NULL,
+        event_type  TEXT NOT NULL,
+        object_type TEXT,
+        object_uuid TEXT,
+        summary     TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_incident_events_incident ON incident_events(incident_id, occurred_at);
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -3614,5 +3779,74 @@ mod tests {
 
         let cleared = set_resource_request_incident_conn(&conn, req.id, None).expect("clearing should succeed");
         assert!(cleared.incident_id.is_none());
+    }
+
+    #[test]
+    fn incident_timeline_records_the_real_sequence_of_a_realistic_scenario() {
+        let conn = fresh_db();
+
+        let incident = create_incident_conn(&conn, "Panhandle Severe Weather".to_string(), None);
+        let frank = create_person_conn(&conn, Some("KJ4ESQ".to_string()), "Frank".to_string(), Some("Net Control".to_string()));
+        assign_person_to_incident_conn(&conn, frank.id, Some(incident.uuid.clone())).unwrap();
+        set_person_status_conn(&conn, frank.id, "on_scene".to_string()).unwrap();
+        let fuel = create_resource_request_conn(&conn, Some(incident.uuid.clone()), "fuel".to_string(), None, Some("40 gallons".to_string()), Some("Shelter 3".to_string()), "priority".to_string(), None, None).unwrap();
+        set_resource_request_status_conn(&conn, fuel.id, "fulfilled".to_string()).unwrap();
+        conn.execute(
+            "INSERT INTO messages (precedence, date_time, message_text, uuid, updated_at, trust_state) VALUES ('routine', '2026-09-02T00:00:00Z', 'test', 'msg-timeline-1', '2026-09-02T00:00:00Z', 'local')",
+            [],
+        )
+        .unwrap();
+        let message_id = conn.last_insert_rowid();
+        set_message_incident_conn(&conn, message_id, Some(incident.uuid.clone())).unwrap();
+        close_incident_conn(&conn, incident.id).unwrap();
+
+        let events = get_incident_events_conn(&conn, &incident.uuid);
+        let event_types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+        assert_eq!(
+            event_types,
+            vec![
+                "incident_declared",
+                "person_assigned",
+                "person_status_changed",
+                "resource_requested",
+                "resource_status_changed",
+                "message_tagged",
+                "incident_closed",
+            ],
+            "the timeline must read back in the exact order things actually happened"
+        );
+
+        // Spot-check a couple of summaries carry real, useful content,
+        // not just a generic "something happened" placeholder.
+        assert!(events[1].summary.contains("Frank"));
+        assert!(events[3].summary.contains("fuel"));
+        assert!(events.iter().all(|e| e.incident_id == incident.uuid), "every event on this timeline must belong to this incident");
+    }
+
+    #[test]
+    fn moving_a_person_between_incidents_logs_unassigned_on_the_old_one_and_assigned_on_the_new_one() {
+        let conn = fresh_db();
+        let incident_a = create_incident_conn(&conn, "Incident A".to_string(), None);
+        let incident_b = create_incident_conn(&conn, "Incident B".to_string(), None);
+        let person = create_person_conn(&conn, None, "Mobile Operator".to_string(), None);
+
+        assign_person_to_incident_conn(&conn, person.id, Some(incident_a.uuid.clone())).unwrap();
+        assign_person_to_incident_conn(&conn, person.id, Some(incident_b.uuid.clone())).unwrap();
+
+        let events_a = get_incident_events_conn(&conn, &incident_a.uuid);
+        let events_b = get_incident_events_conn(&conn, &incident_b.uuid);
+        assert_eq!(events_a.iter().map(|e| e.event_type.as_str()).collect::<Vec<_>>(), vec!["incident_declared", "person_assigned", "person_unassigned"]);
+        assert_eq!(events_b.iter().map(|e| e.event_type.as_str()).collect::<Vec<_>>(), vec!["incident_declared", "person_assigned"]);
+    }
+
+    #[test]
+    fn a_status_change_on_an_unassigned_person_logs_no_event_anywhere() {
+        // Nothing to attach the event to -- this must not panic or write
+        // a row with an empty/fake incident_id.
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Unassigned Operator".to_string(), None);
+        set_person_status_conn(&conn, person.id, "unavailable".to_string()).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM incident_events", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
     }
 }
