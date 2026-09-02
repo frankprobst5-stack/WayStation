@@ -128,6 +128,8 @@ pub fn run() {
             db::set_resource_request_status,
             db::set_resource_request_incident,
             db::get_incident_events,
+            db::create_sitrep,
+            db::get_sitreps,
             db::get_alerts,
             db::get_net_roster,
             db::check_in_station,

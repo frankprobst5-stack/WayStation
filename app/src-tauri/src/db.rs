@@ -884,6 +884,130 @@ pub fn get_incident_events(db: State<Db>, incident_id: String) -> Vec<IncidentEv
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Sitrep {
+    pub id: i64,
+    pub uuid: String,
+    pub incident_id: String,
+    pub sequence: i64,
+    pub body: String,
+    pub created_at: String,
+    pub created_by: Option<String>,
+    pub revision: i64,
+    pub trust_state: String,
+}
+
+fn sitrep_from_row(row: &rusqlite::Row) -> rusqlite::Result<Sitrep> {
+    Ok(Sitrep {
+        id: row.get(0)?,
+        uuid: row.get(1)?,
+        incident_id: row.get(2)?,
+        sequence: row.get(3)?,
+        body: row.get(4)?,
+        created_at: row.get(5)?,
+        created_by: row.get(6)?,
+        revision: row.get(7)?,
+        trust_state: row.get(8)?,
+    })
+}
+
+/// Renders the actual report text at generation time -- pulls real,
+/// current data from personnel/resource_requests/incident_events, all
+/// filtered to this one incident, and formats it as something an
+/// operator could read off a screen or hand someone on paper. This is
+/// the "printable report" the roadmap's planning notes describe;
+/// there's no separate rendering path for print vs. screen because
+/// plain text already works for both.
+fn generate_sitrep_body(conn: &Connection, incident: &Incident) -> String {
+    let personnel: Vec<Person> = get_personnel_conn(conn).into_iter().filter(|p| p.incident_id.as_deref() == Some(incident.uuid.as_str())).collect();
+    let resources: Vec<ResourceRequest> = get_resource_requests_conn(conn).into_iter().filter(|r| r.incident_id.as_deref() == Some(incident.uuid.as_str())).collect();
+    let events = get_incident_events_conn(conn, &incident.uuid);
+
+    let mut body = String::new();
+    body.push_str("SITUATION REPORT\n");
+    body.push_str(&format!("Incident: {}\n", incident.name));
+    if let Some(desc) = &incident.description {
+        body.push_str(&format!("Description: {desc}\n"));
+    }
+    body.push_str(&format!("Status: {}\n", incident.status.to_uppercase()));
+    body.push_str(&format!("Started: {}\n", incident.created_at));
+    if let Some(closed) = &incident.closed_at {
+        body.push_str(&format!("Closed: {closed}\n"));
+    }
+    body.push_str(&format!("Generated: {}\n\n", chrono::Utc::now().to_rfc3339()));
+
+    body.push_str(&format!("PERSONNEL ({})\n", personnel.len()));
+    if personnel.is_empty() {
+        body.push_str("  None assigned\n");
+    }
+    for p in &personnel {
+        let callsign = p.callsign.as_ref().map(|c| format!(" ({c})")).unwrap_or_default();
+        let role = p.role.as_deref().unwrap_or("no role given");
+        body.push_str(&format!("  {}{} -- {} -- {}\n", p.name, callsign, p.status.to_uppercase(), role));
+    }
+    body.push('\n');
+
+    body.push_str(&format!("RESOURCE REQUESTS ({})\n", resources.len()));
+    if resources.is_empty() {
+        body.push_str("  None logged\n");
+    }
+    for r in &resources {
+        let qty = r.quantity.as_deref().unwrap_or("quantity not specified");
+        body.push_str(&format!("  [{}] {} ({}) -- {}\n", r.priority.to_uppercase(), r.resource_type, qty, r.status.to_uppercase()));
+    }
+    body.push('\n');
+
+    body.push_str(&format!("TIMELINE ({} events)\n", events.len()));
+    if events.is_empty() {
+        body.push_str("  Nothing recorded\n");
+    }
+    for e in &events {
+        body.push_str(&format!("  {} -- {}\n", e.occurred_at, e.summary));
+    }
+
+    body
+}
+
+fn create_sitrep_conn(conn: &Connection, incident_id: String, created_by: Option<String>) -> Result<Sitrep, String> {
+    let incident = get_incident_by_uuid(conn, &incident_id).ok_or_else(|| format!("no incident with uuid {incident_id}"))?;
+    let sequence: i64 = conn
+        .query_row("SELECT COALESCE(MAX(sequence), 0) + 1 FROM sitreps WHERE incident_id = ?1", params![incident_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let body = generate_sitrep_body(conn, &incident);
+    let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO sitreps (uuid, incident_id, sequence, body, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![uuid, incident_id, sequence, body, now, created_by],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    record_incident_event(conn, &incident_id, "sitrep_generated", Some("sitrep"), Some(&uuid), &format!("SITREP #{sequence} generated"));
+    Ok(Sitrep { id, uuid, incident_id, sequence, body, created_at: now, created_by, revision: 1, trust_state: "local".to_string() })
+}
+
+#[tauri::command]
+pub fn create_sitrep(db: State<Db>, incident_id: String, created_by: Option<String>) -> Result<Sitrep, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    create_sitrep_conn(&conn, incident_id, created_by)
+}
+
+fn get_sitreps_conn(conn: &Connection, incident_id: &str) -> Vec<Sitrep> {
+    let mut stmt = conn
+        .prepare("SELECT id, uuid, incident_id, sequence, body, created_at, created_by, revision, trust_state FROM sitreps WHERE incident_id = ?1 ORDER BY sequence ASC")
+        .expect("failed to prepare sitreps query");
+    stmt.query_map(params![incident_id], sitrep_from_row)
+        .expect("failed to query sitreps")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_sitreps(db: State<Db>, incident_id: String) -> Vec<Sitrep> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_sitreps_conn(&conn, &incident_id)
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Alert {
     pub id: String,
     pub fetched_at: String,
@@ -3245,6 +3369,34 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_incident_events_incident ON incident_events(incident_id, occurred_at);
     "#,
+    // v36: SITREPs, Phase D slice 5 (closing out Phase D's real backend
+    // scope), decided 2026-09-02. Deliberately a different shape from
+    // every other object added today: incidents/personnel/resource_
+    // requests/messages/markers all represent *current* state --
+    // editable, revisable. A SITREP is the opposite on purpose: a
+    // permanent, sequence-numbered snapshot of what was known at one
+    // moment (real ICS practice -- "SITREP #3 as of 14:32Z"), valuable
+    // specifically *because* it doesn't change after the fact, unlike
+    // everything else built today. `sequence` is per-incident (SITREP
+    // #1, #2, #3 for *this* incident, not a global counter). `body` is
+    // rendered plain text at generation time -- not re-derived on every
+    // read -- so a SITREP genuinely still reads the same way next
+    // month even after the personnel/resources it summarized have
+    // since changed.
+    r#"
+    CREATE TABLE sitreps (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid         TEXT NOT NULL UNIQUE,
+        incident_id  TEXT NOT NULL,
+        sequence     INTEGER NOT NULL,
+        body         TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        created_by   TEXT,
+        revision     INTEGER NOT NULL DEFAULT 1,
+        trust_state  TEXT NOT NULL DEFAULT 'local'
+    );
+    CREATE INDEX idx_sitreps_incident ON sitreps(incident_id, sequence);
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -3848,5 +4000,74 @@ mod tests {
         set_person_status_conn(&conn, person.id, "unavailable".to_string()).unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM incident_events", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sitrep_body_contains_real_personnel_resource_and_timeline_content() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Panhandle Severe Weather".to_string(), Some("Tornado watch".to_string()));
+        let frank = create_person_conn(&conn, Some("KJ4ESQ".to_string()), "Frank".to_string(), Some("Net Control".to_string()));
+        assign_person_to_incident_conn(&conn, frank.id, Some(incident.uuid.clone())).unwrap();
+        create_resource_request_conn(&conn, Some(incident.uuid.clone()), "fuel".to_string(), None, Some("40 gallons".to_string()), None, "priority".to_string(), None, None).unwrap();
+
+        let sitrep = create_sitrep_conn(&conn, incident.uuid.clone(), Some("KJ4ESQ".to_string())).expect("generating a sitrep for a real incident should succeed");
+
+        assert_eq!(sitrep.sequence, 1);
+        assert!(sitrep.body.contains("Panhandle Severe Weather"));
+        assert!(sitrep.body.contains("Frank"));
+        assert!(sitrep.body.contains("KJ4ESQ"));
+        assert!(sitrep.body.contains("fuel"));
+        assert!(sitrep.body.contains("40 gallons"));
+        // The declaration + the assignment + the resource request are
+        // all real timeline events that should show up in the report's
+        // own timeline section.
+        assert!(sitrep.body.contains("Incident declared"));
+    }
+
+    #[test]
+    fn sitrep_sequence_numbers_increment_per_incident_not_globally() {
+        let conn = fresh_db();
+        let incident_a = create_incident_conn(&conn, "Incident A".to_string(), None);
+        let incident_b = create_incident_conn(&conn, "Incident B".to_string(), None);
+
+        let a1 = create_sitrep_conn(&conn, incident_a.uuid.clone(), None).unwrap();
+        let b1 = create_sitrep_conn(&conn, incident_b.uuid.clone(), None).unwrap();
+        let a2 = create_sitrep_conn(&conn, incident_a.uuid.clone(), None).unwrap();
+
+        assert_eq!(a1.sequence, 1);
+        assert_eq!(b1.sequence, 1, "each incident's sitreps count from 1, not a shared global counter");
+        assert_eq!(a2.sequence, 2);
+    }
+
+    #[test]
+    fn generating_a_sitrep_for_an_unknown_incident_is_rejected() {
+        let conn = fresh_db();
+        let err = create_sitrep_conn(&conn, "does-not-exist".to_string(), None).expect_err("an unknown incident must be rejected");
+        assert!(err.contains("does-not-exist"));
+    }
+
+    #[test]
+    fn generating_a_sitrep_itself_appears_on_the_incidents_own_timeline() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        create_sitrep_conn(&conn, incident.uuid.clone(), None).unwrap();
+
+        let events = get_incident_events_conn(&conn, &incident.uuid);
+        let last = events.last().expect("there should be at least the declaration event plus the sitrep event");
+        assert_eq!(last.event_type, "sitrep_generated");
+        assert!(last.summary.contains("SITREP #1"));
+    }
+
+    #[test]
+    fn get_sitreps_returns_them_in_sequence_order() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        create_sitrep_conn(&conn, incident.uuid.clone(), None).unwrap();
+        create_sitrep_conn(&conn, incident.uuid.clone(), None).unwrap();
+        create_sitrep_conn(&conn, incident.uuid.clone(), None).unwrap();
+
+        let listed = get_sitreps_conn(&conn, &incident.uuid);
+        let sequences: Vec<i64> = listed.iter().map(|s| s.sequence).collect();
+        assert_eq!(sequences, vec![1, 2, 3]);
     }
 }

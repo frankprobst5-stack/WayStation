@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-// Mirrors db::Incident. Phase D slice 1 -- create/list/close. Personnel,
-// resources, and a timeline exist as separate panels/sections now;
-// structured SITREP and tactical-map integration are still real future
-// work, not something this panel claims to do.
+// Mirrors db::Incident. Phase D -- create/list/close, with personnel,
+// resources, timeline, and SITREPs all built as of 2026-09-02. Tactical
+// map integration is the one real piece still outstanding.
 interface Incident {
   id: number;
   uuid: string;
@@ -29,6 +28,19 @@ interface IncidentEvent {
   occurred_at: string;
 }
 
+// Mirrors db::Sitrep.
+interface Sitrep {
+  id: number;
+  uuid: string;
+  incident_id: string;
+  sequence: number;
+  body: string;
+  created_at: string;
+  created_by: string | null;
+  revision: number;
+  trust_state: string;
+}
+
 function IncidentTimeline({ incidentUuid }: { incidentUuid: string }) {
   const [events, setEvents] = useState<IncidentEvent[] | null>(null);
 
@@ -51,13 +63,75 @@ function IncidentTimeline({ incidentUuid }: { incidentUuid: string }) {
   );
 }
 
+function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
+  const [sitreps, setSitreps] = useState<Sitrep[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  async function refresh() {
+    setSitreps(await invoke<Sitrep[]>("get_sitreps", { incidentId: incidentUuid }));
+  }
+
+  useEffect(() => {
+    refresh();
+  }, [incidentUuid]);
+
+  async function generate() {
+    setGenerating(true);
+    try {
+      await invoke("create_sitrep", { incidentId: incidentUuid, createdBy: null });
+      await refresh();
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function copyBody(sitrep: Sitrep) {
+    await navigator.clipboard.writeText(sitrep.body);
+    setCopiedId(sitrep.id);
+    setTimeout(() => setCopiedId(null), 1500);
+  }
+
+  return (
+    <div className="incident-sitreps">
+      <div className="incident-sitreps-head">
+        <span>
+          {sitreps.length === 0 ? "No SITREPs generated yet." : `${sitreps.length} SITREP${sitreps.length === 1 ? "" : "s"} generated.`}
+        </span>
+        <button type="button" onClick={generate} disabled={generating}>
+          {generating ? "Generating…" : "Generate New SITREP"}
+        </button>
+      </div>
+      {sitreps.map((sitrep) => (
+        <div key={sitrep.id} className="incident-sitrep-row">
+          <div className="incident-sitrep-row-head">
+            <span className="incident-sitrep-label">
+              SITREP #{sitrep.sequence} — {new Date(sitrep.created_at).toLocaleString()}
+            </span>
+            <button type="button" onClick={() => setOpenId((current) => (current === sitrep.id ? null : sitrep.id))}>
+              {openId === sitrep.id ? "Hide" : "View"}
+            </button>
+            <button type="button" onClick={() => copyBody(sitrep)}>
+              {copiedId === sitrep.id ? "Copied" : "Copy"}
+            </button>
+          </div>
+          {openId === sitrep.id && <pre className="incident-sitrep-body">{sitrep.body}</pre>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type ExpandedSection = "timeline" | "sitreps" | null;
+
 function IncidentsPanel() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [closingId, setClosingId] = useState<number | null>(null);
-  const [expandedUuid, setExpandedUuid] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<{ uuid: string; section: ExpandedSection }>({ uuid: "", section: null });
 
   async function refresh() {
     setIncidents(await invoke<Incident[]>("get_incidents"));
@@ -91,15 +165,15 @@ function IncidentsPanel() {
     }
   }
 
-  function toggleTimeline(uuid: string) {
-    setExpandedUuid((current) => (current === uuid ? null : uuid));
+  function toggle(uuid: string, section: ExpandedSection) {
+    setExpanded((current) => (current.uuid === uuid && current.section === section ? { uuid: "", section: null } : { uuid, section }));
   }
 
   const active = incidents.filter((i) => i.status === "active");
   const closed = incidents.filter((i) => i.status === "closed");
 
   function renderIncident(incident: Incident) {
-    const isExpanded = expandedUuid === incident.uuid;
+    const isThis = expanded.uuid === incident.uuid;
     return (
       <div key={incident.id} className={`incident-row incident-row-${incident.status}`}>
         <div className="incident-row-top">
@@ -112,8 +186,11 @@ function IncidentsPanel() {
                 : `${new Date(incident.created_at).toLocaleDateString()} – ${incident.closed_at ? new Date(incident.closed_at).toLocaleDateString() : "?"}`}
             </span>
           </div>
-          <button type="button" onClick={() => toggleTimeline(incident.uuid)}>
-            {isExpanded ? "Hide Timeline" : "Timeline"}
+          <button type="button" onClick={() => toggle(incident.uuid, "timeline")}>
+            {isThis && expanded.section === "timeline" ? "Hide Timeline" : "Timeline"}
+          </button>
+          <button type="button" onClick={() => toggle(incident.uuid, "sitreps")}>
+            {isThis && expanded.section === "sitreps" ? "Hide SITREPs" : "SITREPs"}
           </button>
           {incident.status === "active" && (
             <button type="button" onClick={() => closeIncident(incident.id)} disabled={closingId === incident.id}>
@@ -121,7 +198,8 @@ function IncidentsPanel() {
             </button>
           )}
         </div>
-        {isExpanded && <IncidentTimeline incidentUuid={incident.uuid} />}
+        {isThis && expanded.section === "timeline" && <IncidentTimeline incidentUuid={incident.uuid} />}
+        {isThis && expanded.section === "sitreps" && <IncidentSitreps incidentUuid={incident.uuid} />}
       </div>
     );
   }
@@ -130,8 +208,9 @@ function IncidentsPanel() {
     <div className="panel-incidents">
       <p className="incidents-lede">
         A declared incident is what messages, map markers, personnel, and resource requests get tagged against —
-        the shared context everything else in Phase D builds on. Every tag, status change, and assignment against
-        an incident is recorded on its timeline.
+        the shared context everything else in Phase D builds on. Every tag, status change, and assignment is
+        recorded on its timeline; a SITREP freezes a snapshot of all of it at one point in time, permanently, for
+        the after-action record.
       </p>
 
       <form className="incidents-create-form" onSubmit={createIncident}>
