@@ -22,10 +22,83 @@ use crate::db::{self, MapMarker, Message};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+/// WSP/1 -- the WayStation Interchange Protocol, version 1. "Version 1"
+/// specifically because every file this module writes was, until now, a
+/// bare JSON array: no way to tell it apart from any other JSON array
+/// before trying to parse it, no way to detect a future format change
+/// and fail with a clear message instead of a confusing deserialize
+/// error, and no record of which station actually produced it. This is
+/// the real, working wire format -- not the compact/fragmentable/
+/// compressed encoding the original planning notes describe for
+/// constrained RF links. That's deliberately not built yet: there's no
+/// real bandwidth-constrained transport exercising this protocol today
+/// (file exchange has no such limit), and building a compact binary
+/// encoding speculatively, before anything actually needs it, is the
+/// exact premature-abstraction mistake this codebase already learned
+/// not to repeat once (see transport.rs's own history). When a
+/// constrained-link transport is real, WSP/2 is where that encoding
+/// belongs -- this module's version check is what makes that a clean,
+/// detectable upgrade instead of a silent incompatibility.
+pub const WSP_VERSION: u8 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ObjectKind {
     Message,
     Marker,
+}
+
+/// Every file this protocol produces is one of these, not a bare array.
+/// `origin_callsign` and `generated_at` exist for the same reason
+/// provenance exists everywhere else in this app: an operator looking
+/// at an old sync file on disk, or troubleshooting a failed import,
+/// should be able to tell who made it and when without guessing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "wsp_kind", rename_all = "snake_case")]
+pub enum WspEnvelope {
+    Manifest { wsp_version: u8, origin_callsign: Option<String>, generated_at: String, entries: Vec<ManifestEntry> },
+    Objects { wsp_version: u8, origin_callsign: Option<String>, generated_at: String, entries: Vec<SyncObject> },
+}
+
+fn wrap_manifest(conn: &Connection, entries: Vec<ManifestEntry>) -> WspEnvelope {
+    WspEnvelope::Manifest {
+        wsp_version: WSP_VERSION,
+        origin_callsign: db::station_profile(conn).callsign,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        entries,
+    }
+}
+
+fn wrap_objects(conn: &Connection, entries: Vec<SyncObject>) -> WspEnvelope {
+    WspEnvelope::Objects {
+        wsp_version: WSP_VERSION,
+        origin_callsign: db::station_profile(conn).callsign,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        entries,
+    }
+}
+
+/// Rejects a future, not-yet-understood WSP version explicitly rather
+/// than trying to parse it and failing confusingly partway through --
+/// and rejects the wrong envelope kind (a manifest file handed to
+/// something expecting an objects file, or vice versa) the same way.
+fn unwrap_manifest(envelope: WspEnvelope) -> Result<Vec<ManifestEntry>, String> {
+    match envelope {
+        WspEnvelope::Manifest { wsp_version, entries, .. } if wsp_version <= WSP_VERSION => Ok(entries),
+        WspEnvelope::Manifest { wsp_version, .. } => {
+            Err(format!("this file uses WSP/{wsp_version}, newer than this WayStation understands (WSP/{WSP_VERSION}) -- update WayStation before importing it"))
+        }
+        WspEnvelope::Objects { .. } => Err("expected a WSP manifest file, got an objects file".to_string()),
+    }
+}
+
+fn unwrap_objects(envelope: WspEnvelope) -> Result<Vec<SyncObject>, String> {
+    match envelope {
+        WspEnvelope::Objects { wsp_version, entries, .. } if wsp_version <= WSP_VERSION => Ok(entries),
+        WspEnvelope::Objects { wsp_version, .. } => {
+            Err(format!("this file uses WSP/{wsp_version}, newer than this WayStation understands (WSP/{WSP_VERSION}) -- update WayStation before importing it"))
+        }
+        WspEnvelope::Manifest { .. } => Err("expected a WSP objects file, got a manifest file".to_string()),
+    }
 }
 
 /// The lightweight side of the protocol -- enough to decide what's
@@ -200,14 +273,16 @@ pub fn merge_incoming(conn: &Connection, objects: Vec<SyncObject>) -> MergeRepor
 pub fn export_manifest_to_file(db: tauri::State<db::Db>, path: String) -> Result<(), String> {
     let conn = db.0.lock().expect("db mutex poisoned");
     let manifest = export_manifest(&conn);
-    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    let envelope = wrap_manifest(&conn, manifest);
+    let json = serde_json::to_string_pretty(&envelope).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn manifest_diff_from_file(db: tauri::State<db::Db>, remote_manifest_path: String) -> Result<Vec<String>, String> {
     let remote_json = std::fs::read_to_string(remote_manifest_path).map_err(|e| e.to_string())?;
-    let remote: Vec<ManifestEntry> = serde_json::from_str(&remote_json).map_err(|e| e.to_string())?;
+    let envelope: WspEnvelope = serde_json::from_str(&remote_json).map_err(|e| e.to_string())?;
+    let remote = unwrap_manifest(envelope)?;
     let conn = db.0.lock().expect("db mutex poisoned");
     let local = export_manifest(&conn);
     Ok(uuids_needed_from(&local, &remote))
@@ -216,18 +291,21 @@ pub fn manifest_diff_from_file(db: tauri::State<db::Db>, remote_manifest_path: S
 #[tauri::command]
 pub fn export_objects_to_file(db: tauri::State<db::Db>, remote_manifest_path: String, requested_uuids: Vec<String>, out_path: String) -> Result<(), String> {
     let remote_json = std::fs::read_to_string(remote_manifest_path).map_err(|e| e.to_string())?;
-    let remote: Vec<ManifestEntry> = serde_json::from_str(&remote_json).map_err(|e| e.to_string())?;
+    let envelope: WspEnvelope = serde_json::from_str(&remote_json).map_err(|e| e.to_string())?;
+    let remote = unwrap_manifest(envelope)?;
     let requested: Vec<ManifestEntry> = remote.into_iter().filter(|e| requested_uuids.contains(&e.uuid)).collect();
     let conn = db.0.lock().expect("db mutex poisoned");
     let objects = export_objects(&conn, &requested);
-    let json = serde_json::to_string_pretty(&objects).map_err(|e| e.to_string())?;
+    let out_envelope = wrap_objects(&conn, objects);
+    let json = serde_json::to_string_pretty(&out_envelope).map_err(|e| e.to_string())?;
     std::fs::write(out_path, json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn import_objects_from_file(db: tauri::State<db::Db>, path: String) -> Result<MergeReport, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let objects: Vec<SyncObject> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let envelope: WspEnvelope = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let objects = unwrap_objects(envelope)?;
     let conn = db.0.lock().expect("db mutex poisoned");
     Ok(merge_incoming(&conn, objects))
 }
@@ -253,7 +331,8 @@ pub fn export_full_bundle_to_file(db: tauri::State<db::Db>, path: String) -> Res
     let manifest = export_manifest(&conn);
     let objects = export_objects(&conn, &manifest);
     let count = objects.len();
-    let json = serde_json::to_string_pretty(&objects).map_err(|e| e.to_string())?;
+    let envelope = wrap_objects(&conn, objects);
+    let json = serde_json::to_string_pretty(&envelope).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())?;
     Ok(count)
 }
@@ -427,5 +506,61 @@ mod tests {
         // B's own data is untouched -- a conflict changes nothing until
         // an operator resolves it, it doesn't guess a winner.
         assert_eq!(db::get_message_by_uuid(&station_b, "uuid-conflict").unwrap().message_text, "B's version");
+    }
+
+    #[test]
+    fn envelope_round_trips_through_real_json_serialization() {
+        let conn = fresh_db();
+        db::insert_synced_message(&conn, &make_message("uuid-1", 1, "hello", "hash-1"));
+
+        let manifest = export_manifest(&conn);
+        let wrapped = wrap_manifest(&conn, manifest.clone());
+        let json = serde_json::to_string(&wrapped).expect("envelope must serialize");
+        let parsed: WspEnvelope = serde_json::from_str(&json).expect("envelope must deserialize");
+        let unwrapped = unwrap_manifest(parsed).expect("a valid WSP/1 manifest envelope must unwrap cleanly");
+
+        assert_eq!(unwrapped.len(), manifest.len());
+        assert_eq!(unwrapped[0].uuid, "uuid-1");
+    }
+
+    #[test]
+    fn envelope_records_the_real_station_callsign() {
+        let conn = fresh_db();
+        // A fresh migrated database has no station_profile row at all --
+        // one is only created the first time an operator saves the
+        // Station form (db::save_station_profile). Insert one directly
+        // rather than UPDATE, which would silently match zero rows here.
+        conn.execute(
+            "INSERT INTO station_profile (id, callsign, updated_at) VALUES (1, 'KJ4ESQ', '2026-09-02T00:00:00Z')",
+            [],
+        )
+        .expect("station_profile insert should succeed against the migrated schema");
+        let wrapped = wrap_manifest(&conn, vec![]);
+        match wrapped {
+            WspEnvelope::Manifest { origin_callsign, .. } => assert_eq!(origin_callsign.as_deref(), Some("KJ4ESQ")),
+            WspEnvelope::Objects { .. } => panic!("wrap_manifest must produce a Manifest envelope"),
+        }
+    }
+
+    #[test]
+    fn a_future_wsp_version_is_rejected_with_a_clear_error_not_a_silent_misparse() {
+        let future = WspEnvelope::Manifest {
+            wsp_version: WSP_VERSION + 1,
+            origin_callsign: None,
+            generated_at: "2026-09-02T00:00:00Z".to_string(),
+            entries: vec![],
+        };
+        let err = unwrap_manifest(future).expect_err("a newer WSP version must not be silently accepted");
+        assert!(err.contains("WSP/2"), "error should name the actual version encountered: {err}");
+    }
+
+    #[test]
+    fn handing_a_manifest_file_to_the_objects_importer_fails_clearly() {
+        // The real mistake an operator could actually make: picking the
+        // wrong file in the Import dialog. This must fail with a message
+        // that explains what happened, not a raw deserialize panic.
+        let envelope = WspEnvelope::Manifest { wsp_version: WSP_VERSION, origin_callsign: None, generated_at: "now".to_string(), entries: vec![] };
+        let err = unwrap_objects(envelope).expect_err("a manifest envelope must not be accepted where objects are expected");
+        assert!(err.contains("manifest"), "error should say what kind of file was actually given: {err}");
     }
 }
