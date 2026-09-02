@@ -7,6 +7,7 @@ import NetControlPanel from "./NetControlPanel";
 import MessagesPanel from "./MessagesPanel";
 import IncidentInfoPanel from "./IncidentInfoPanel";
 import IncidentsPanel from "./IncidentsPanel";
+import PersonnelPanel from "./PersonnelPanel";
 import TacticalMapPanel from "./TacticalMapPanel";
 import ResourcesPanel from "./ResourcesPanel";
 import ReadinessPanel from "./ReadinessPanel";
@@ -100,6 +101,17 @@ registerPanel({
   width: "wide",
   height: "natural",
   component: IncidentsPanel,
+});
+
+registerPanel({
+  id: "personnel",
+  title: "Personnel",
+  category: "emcomm",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "always-available",
+  width: "wide",
+  height: "natural",
+  component: PersonnelPanel,
 });
 
 registerPanel({

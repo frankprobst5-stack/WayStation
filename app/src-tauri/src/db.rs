@@ -424,6 +424,139 @@ pub fn set_marker_incident(db: State<Db>, marker_id: i64, incident_id: Option<St
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Person {
+    pub id: i64,
+    pub uuid: String,
+    pub callsign: Option<String>,
+    pub name: String,
+    pub role: Option<String>,
+    pub status: String,
+    pub location: Option<String>,
+    pub incident_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: i64,
+    pub trust_state: String,
+}
+
+const PERSON_COLUMNS: &str = "id, uuid, callsign, name, role, status, location, incident_id, created_at, updated_at, revision, trust_state";
+
+fn person_from_row(row: &rusqlite::Row) -> rusqlite::Result<Person> {
+    Ok(Person {
+        id: row.get(0)?,
+        uuid: row.get(1)?,
+        callsign: row.get(2)?,
+        name: row.get(3)?,
+        role: row.get(4)?,
+        status: row.get(5)?,
+        location: row.get(6)?,
+        incident_id: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        revision: row.get(10)?,
+        trust_state: row.get(11)?,
+    })
+}
+
+fn create_person_conn(conn: &Connection, callsign: Option<String>, name: String, role: Option<String>) -> Person {
+    let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO personnel (uuid, callsign, name, role, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'available', ?5, ?5)",
+        params![uuid, callsign, name, role, now],
+    )
+    .expect("failed to create person");
+    let id = conn.last_insert_rowid();
+    Person {
+        id,
+        uuid,
+        callsign,
+        name,
+        role,
+        status: "available".to_string(),
+        location: None,
+        incident_id: None,
+        created_at: now.clone(),
+        updated_at: now,
+        revision: 1,
+        trust_state: "local".to_string(),
+    }
+}
+
+#[tauri::command]
+pub fn create_person(db: State<Db>, callsign: Option<String>, name: String, role: Option<String>) -> Person {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    create_person_conn(&conn, callsign, name, role)
+}
+
+/// Assigned-to-something-right-now first (what an operator opening this
+/// panel during an incident actually needs to see), then alphabetical
+/// within each group -- not creation order, which has no operational
+/// meaning here.
+fn get_personnel_conn(conn: &Connection) -> Vec<Person> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {PERSON_COLUMNS} FROM personnel ORDER BY (status IN ('assigned', 'en_route', 'on_scene', 'emergency')) DESC, name ASC"
+        ))
+        .expect("failed to prepare personnel query");
+    stmt.query_map([], person_from_row)
+        .expect("failed to query personnel")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_personnel(db: State<Db>) -> Vec<Person> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_personnel_conn(&conn)
+}
+
+const PERSON_STATUSES: &[&str] = &["available", "assigned", "en_route", "on_scene", "unavailable", "off_duty", "emergency"];
+
+fn set_person_status_conn(conn: &Connection, person_id: i64, status: String) -> Result<Person, String> {
+    if !PERSON_STATUSES.contains(&status.as_str()) {
+        return Err(format!("unknown status '{status}' -- must be one of {PERSON_STATUSES:?}"));
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE personnel SET status = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![status, now, person_id])
+        .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "person not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_person_status(db: State<Db>, person_id: i64, status: String) -> Result<Person, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_person_status_conn(&conn, person_id, status)
+}
+
+/// Assigns (or, when `incident_id` is None, clears) which incident this
+/// person is currently tied to. Same dangling-reference protection as
+/// `set_message_incident_conn`/`set_marker_incident_conn` -- an unknown
+/// incident uuid is rejected outright, not written and left to cause
+/// confusion later.
+fn assign_person_to_incident_conn(conn: &Connection, person_id: i64, incident_id: Option<String>) -> Result<Person, String> {
+    if let Some(uuid) = &incident_id {
+        get_incident_by_uuid(conn, uuid).ok_or_else(|| format!("no incident with uuid {uuid}"))?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE personnel SET incident_id = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3", params![incident_id, now, person_id])
+        .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "person not found".to_string())
+}
+
+#[tauri::command]
+pub fn assign_person_to_incident(db: State<Db>, person_id: i64, incident_id: Option<String>) -> Result<Person, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    assign_person_to_incident_conn(&conn, person_id, incident_id)
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Alert {
     pub id: String,
     pub fetched_at: String,
@@ -2697,6 +2830,35 @@ const MIGRATIONS: &[&str] = &[
         trust_state  TEXT NOT NULL DEFAULT 'local'
     );
     "#,
+    // v33: personnel/team tracking, Phase D slice 2, decided 2026-09-02.
+    // A deliberately different concept from `net_roster` (v3): that
+    // table tracks radio check-in state (is this station on frequency
+    // right now, last heard, traffic count) -- this tracks incident
+    // *assignment* state (what's this person's role, where are they,
+    // are they available/assigned/en-route/on-scene). The same human
+    // can appear in both without conflict; overloading net_roster with
+    // a second, different meaning was considered and rejected in favor
+    // of a real, separate object type, matching the roadmap's own list
+    // (person/team as distinct canonical object types). `incident_id`
+    // is nullable -- personnel are a standing roster (family, known
+    // operators) that get assigned to a specific incident when one
+    // exists, not something that only exists inside one.
+    r#"
+    CREATE TABLE personnel (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid         TEXT NOT NULL UNIQUE,
+        callsign     TEXT,
+        name         TEXT NOT NULL,
+        role         TEXT,
+        status       TEXT NOT NULL CHECK (status IN ('available', 'assigned', 'en_route', 'on_scene', 'unavailable', 'off_duty', 'emergency')) DEFAULT 'available',
+        location     TEXT,
+        incident_id  TEXT,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        revision     INTEGER NOT NULL DEFAULT 1,
+        trust_state  TEXT NOT NULL DEFAULT 'local'
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -3081,5 +3243,76 @@ mod tests {
 
         // And the message itself must be untouched by the rejected attempt.
         assert!(get_message(&conn, message_id).unwrap().incident_id.is_none());
+    }
+
+    #[test]
+    fn person_defaults_to_available_with_no_incident() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, Some("KJ4ESQ".to_string()), "Frank".to_string(), Some("Net Control".to_string()));
+        assert_eq!(person.status, "available");
+        assert!(person.incident_id.is_none());
+        assert_eq!(person.revision, 1);
+    }
+
+    #[test]
+    fn set_person_status_rejects_unknown_status_and_leaves_the_record_untouched() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Test Operator".to_string(), None);
+        let err = set_person_status_conn(&conn, person.id, "napping".to_string()).expect_err("an unrecognized status must be rejected");
+        assert!(err.contains("napping"));
+        // Confirm nothing was silently half-applied.
+        let unchanged = get_personnel_conn(&conn).into_iter().find(|p| p.id == person.id).unwrap();
+        assert_eq!(unchanged.status, "available");
+        assert_eq!(unchanged.revision, 1);
+    }
+
+    #[test]
+    fn set_person_status_accepts_every_documented_status() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Test Operator".to_string(), None);
+        for status in PERSON_STATUSES {
+            let updated = set_person_status_conn(&conn, person.id, status.to_string()).unwrap_or_else(|e| panic!("status '{status}' should be accepted: {e}"));
+            assert_eq!(updated.status, *status);
+        }
+    }
+
+    #[test]
+    fn assigning_a_person_to_a_real_incident_succeeds_and_can_be_cleared() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Field Exercise".to_string(), None);
+        let person = create_person_conn(&conn, Some("K7WSP".to_string()), "Field Operator".to_string(), Some("Field Team".to_string()));
+
+        let assigned = assign_person_to_incident_conn(&conn, person.id, Some(incident.uuid.clone())).expect("assigning to a real incident must succeed");
+        assert_eq!(assigned.incident_id.as_deref(), Some(incident.uuid.as_str()));
+
+        let cleared = assign_person_to_incident_conn(&conn, person.id, None).expect("clearing the assignment must succeed");
+        assert!(cleared.incident_id.is_none());
+    }
+
+    #[test]
+    fn assigning_a_person_to_an_unknown_incident_is_rejected() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Test Operator".to_string(), None);
+        let err = assign_person_to_incident_conn(&conn, person.id, Some("does-not-exist".to_string()))
+            .expect_err("a dangling incident reference must be rejected");
+        assert!(err.contains("does-not-exist"));
+        assert!(get_personnel_conn(&conn).into_iter().find(|p| p.id == person.id).unwrap().incident_id.is_none());
+    }
+
+    #[test]
+    fn get_personnel_lists_actively_assigned_before_everyone_else() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        create_person_conn(&conn, None, "Zed Available".to_string(), None);
+        let amy = create_person_conn(&conn, None, "Amy OnScene".to_string(), None);
+        set_person_status_conn(&conn, amy.id, "on_scene".to_string()).unwrap();
+        assign_person_to_incident_conn(&conn, amy.id, Some(incident.uuid)).unwrap();
+
+        let listed = get_personnel_conn(&conn);
+        // Amy (on_scene) sorts before Zed (available) despite the name
+        // alphabetically going the other way -- operational relevance
+        // beats alphabetical order.
+        let names: Vec<&str> = listed.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["Amy OnScene", "Zed Available"]);
     }
 }
