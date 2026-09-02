@@ -104,9 +104,10 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 1. ~~**Operational object design**~~ — ✅ done 2026-09-01.
 2. ~~**Durable outbound queue with delivery-attempt history**~~ — ✅ done 2026-09-01.
 3. ~~**Two-instance proof without new hardware**~~ — ✅ reconciliation logic done and verified 2026-09-01.
-4. **A minimal sync UI** — a Settings/Diagnostics-adjacent panel to actually trigger export/import and see a merge report (including conflicts), so this is something an operator can use, not just something that's correct in the backend.
+4. ~~**A minimal sync UI**~~ — ✅ `SyncPanel.tsx` shipped 2026-09-01 (Settings → Peer Sync). Not yet clicked through by a human in the real running app.
 5. **WSP/1 real spec** — today's manifest/object JSON is a real, working first version, not the compact/fragmentable/compressed wire format the roadmap envisions for constrained RF links. Worth doing before this protocol goes anywhere near actual mesh/AREDN bandwidth.
 6. **Current-state hardening** — CI/packaging, first-run onboarding, a full no-internet exercise on the existing application.
+7. **Phase D — Incident operations** — the next real phase once #5/#6 are addressed or deliberately deferred: incident workspace/lifecycle, personnel/teams/resources, structured SITREP, operational timeline, tactical map driven by incident objects instead of independent pin layers.
 
 Closing principle, unchanged from the original planning document: **success is not measured by the number of panels. Success is measured by whether WayStation can preserve and move a trustworthy operational picture when ordinary infrastructure fails.**
 
