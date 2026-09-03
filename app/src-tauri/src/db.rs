@@ -69,6 +69,12 @@ pub struct StationProfile {
     /// Map panel; this is the real primary tile source, not the online
     /// OpenFreeMap fallback used when it's unreachable.
     pub citadel_map_host: Option<String>,
+    /// This station's own WSP/1 object-signing secret (HMAC-SHA256 key,
+    /// see sync.rs). Not a Station-form field, same reasoning as
+    /// `manual_offline`/`tactical_mode` -- generated once via
+    /// `get_or_create_signing_secret`, carried through unchanged
+    /// whenever the Station form saves, never silently regenerated.
+    pub signing_secret: Option<String>,
     pub updated_at: Option<String>,
 }
 
@@ -97,6 +103,7 @@ impl Default for StationProfile {
             rotator_enabled: true,
             tactical_mode: true,
             citadel_map_host: None,
+            signing_secret: None,
             updated_at: None,
         }
     }
@@ -104,7 +111,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -120,7 +127,8 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 rotator_enabled: row.get::<_, i64>(9)? != 0,
                 tactical_mode: row.get::<_, i64>(10)? != 0,
                 citadel_map_host: row.get(11)?,
-                updated_at: row.get(12)?,
+                signing_secret: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         },
     )
@@ -177,12 +185,14 @@ pub fn save_station_profile(
 ) -> StationProfile {
     let now = chrono::Utc::now().to_rfc3339();
     let conn = db.0.lock().expect("db mutex poisoned");
-    // The Station form doesn't own the offline flag or tactical_mode --
-    // the header toggle and the mode switch do, respectively. Carry both
+    // The Station form doesn't own the offline flag, tactical_mode, or
+    // the signing secret -- the header toggle, the mode switch, and
+    // get_or_create_signing_secret respectively do. Carry all three
     // existing values through rather than clobbering them.
     let existing = station_profile(&conn);
     let manual_offline = existing.manual_offline;
     let tactical_mode = existing.tactical_mode;
+    let signing_secret = existing.signing_secret;
     conn.execute(
         "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, updated_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -215,8 +225,116 @@ pub fn save_station_profile(
         rotator_enabled,
         tactical_mode,
         citadel_map_host,
+        signing_secret,
         updated_at: Some(now),
     }
+}
+
+/// Generates this station's own WSP/1 signing secret the first time it's
+/// needed, and returns the existing one on every call after that --
+/// deliberately never silently regenerated, since replacing it would
+/// break verification for every peer who was already given the old one.
+/// Two chained UUIDv4s (each already backed by a real CSPRNG in the
+/// `uuid` crate) give 256 bits of entropy without pulling in a
+/// dedicated RNG dependency for one call site.
+fn get_or_create_signing_secret_conn(conn: &Connection) -> String {
+    let existing = station_profile(conn);
+    if let Some(secret) = existing.signing_secret {
+        return secret;
+    }
+    let secret = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO station_profile (id, signing_secret, updated_at) VALUES (1, ?1, ?2)
+         ON CONFLICT(id) DO UPDATE SET signing_secret = excluded.signing_secret, updated_at = excluded.updated_at",
+        params![secret, now],
+    )
+    .expect("failed to save signing_secret");
+    secret
+}
+
+#[tauri::command]
+pub fn get_or_create_signing_secret(db: State<Db>) -> String {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_or_create_signing_secret_conn(&conn)
+}
+
+/// A specific person this station has exchanged a signing secret with
+/// out-of-band (phone call, in person -- never over the sync channel
+/// itself, that would defeat the point). `shared_secret` here is
+/// whatever *they* told this station their own `signing_secret` is --
+/// used to verify objects claiming to come from `callsign`, never to
+/// sign anything this station sends.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrustedPeer {
+    pub id: i64,
+    pub callsign: String,
+    pub shared_secret: String,
+    pub added_at: String,
+    pub notes: Option<String>,
+}
+
+const TRUSTED_PEER_COLUMNS: &str = "id, callsign, shared_secret, added_at, notes";
+
+fn trusted_peer_from_row(row: &rusqlite::Row) -> rusqlite::Result<TrustedPeer> {
+    Ok(TrustedPeer { id: row.get(0)?, callsign: row.get(1)?, shared_secret: row.get(2)?, added_at: row.get(3)?, notes: row.get(4)? })
+}
+
+pub fn add_trusted_peer_conn(conn: &Connection, callsign: String, shared_secret: String, notes: Option<String>) -> Result<TrustedPeer, String> {
+    let callsign = callsign.trim().to_uppercase();
+    if callsign.is_empty() {
+        return Err("callsign cannot be blank".to_string());
+    }
+    if shared_secret.trim().is_empty() {
+        return Err("shared secret cannot be blank".to_string());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO trusted_peers (callsign, shared_secret, added_at, notes) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(callsign) DO UPDATE SET shared_secret = excluded.shared_secret, notes = excluded.notes",
+        params![callsign, shared_secret.trim(), now, notes],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {TRUSTED_PEER_COLUMNS} FROM trusted_peers WHERE callsign = ?1"), params![callsign], trusted_peer_from_row)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_trusted_peer(db: State<Db>, callsign: String, shared_secret: String, notes: Option<String>) -> Result<TrustedPeer, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    add_trusted_peer_conn(&conn, callsign, shared_secret, notes)
+}
+
+fn get_trusted_peers_conn(conn: &Connection) -> Vec<TrustedPeer> {
+    let mut stmt = conn.prepare(&format!("SELECT {TRUSTED_PEER_COLUMNS} FROM trusted_peers ORDER BY callsign ASC")).expect("failed to prepare trusted_peers query");
+    stmt.query_map([], trusted_peer_from_row).expect("failed to query trusted_peers").filter_map(Result::ok).collect()
+}
+
+#[tauri::command]
+pub fn get_trusted_peers(db: State<Db>) -> Vec<TrustedPeer> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_trusted_peers_conn(&conn)
+}
+
+/// Looks a peer's registered secret up by callsign -- what `sync.rs`
+/// calls to verify an incoming signature. Case-insensitive on the same
+/// basis `add_trusted_peer_conn` normalizes on write: a callsign is not
+/// case-sensitive over the air, and shouldn't become a silent lookup
+/// miss here because of it.
+pub fn trusted_peer_secret(conn: &Connection, callsign: &str) -> Option<String> {
+    conn.query_row("SELECT shared_secret FROM trusted_peers WHERE callsign = ?1", params![callsign.trim().to_uppercase()], |row| row.get(0))
+        .optional()
+        .expect("failed to query trusted_peers")
+}
+
+fn delete_trusted_peer_conn(conn: &Connection, id: i64) {
+    conn.execute("DELETE FROM trusted_peers WHERE id = ?1", params![id]).expect("failed to delete trusted_peer");
+}
+
+#[tauri::command]
+pub fn delete_trusted_peer(db: State<Db>, id: i64) {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    delete_trusted_peer_conn(&conn, id);
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -3484,6 +3602,31 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE personnel ADD COLUMN grid_square TEXT;
     ALTER TABLE resource_requests ADD COLUMN grid_square TEXT;
     "#,
+    // v38: WSP/1 object signing, decided 2026-09-03 (roadmap
+    // reconciliation session). Closes a real gap: anyone can transmit
+    // on an open RF path and claim to be any callsign, and nothing
+    // before this could tell a genuine object from a forged one.
+    // `signing_secret` is this station's own HMAC key -- generated
+    // once via `get_or_create_signing_secret`, shared with trusted
+    // people out-of-band (phone call, in person -- never over the sync
+    // channel itself, that would defeat the point), used to sign this
+    // station's own outgoing WSP/1 object exports. `trusted_peers` is
+    // the other half: what specific people told this station *their*
+    // signing secret is, used to verify objects claiming to come from
+    // them. This is shared-secret trust for a small, mutually-known
+    // circle, not a PKI -- adequate for a family/friends net, not
+    // designed for an open/public one. See WSP-1.md for the full
+    // security model and its limits.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN signing_secret TEXT;
+    CREATE TABLE trusted_peers (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        callsign      TEXT NOT NULL UNIQUE,
+        shared_secret TEXT NOT NULL,
+        added_at      TEXT NOT NULL,
+        notes         TEXT
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4211,5 +4354,56 @@ mod tests {
         let cleared = set_resource_request_location_conn(&conn, req.id, None).unwrap();
         assert_eq!(cleared.grid_square, None);
         assert_eq!(cleared.latitude, None);
+    }
+
+    #[test]
+    fn signing_secret_is_generated_once_and_persisted_not_regenerated() {
+        let conn = fresh_db();
+        let first = get_or_create_signing_secret_conn(&conn);
+        assert!(!first.is_empty());
+        let second = get_or_create_signing_secret_conn(&conn);
+        assert_eq!(first, second, "calling this twice must not silently rotate the secret -- that would break every peer already given the old one");
+    }
+
+    #[test]
+    fn signing_secrets_are_not_the_same_across_two_different_stations() {
+        // Cheap real check that this is actually drawing on randomness,
+        // not returning a fixed/placeholder value.
+        let station_a = fresh_db();
+        let station_b = fresh_db();
+        assert_ne!(get_or_create_signing_secret_conn(&station_a), get_or_create_signing_secret_conn(&station_b));
+    }
+
+    #[test]
+    fn add_trusted_peer_rejects_a_blank_callsign_or_secret() {
+        let conn = fresh_db();
+        assert!(add_trusted_peer_conn(&conn, "   ".to_string(), "some-secret".to_string(), None).is_err());
+        assert!(add_trusted_peer_conn(&conn, "K7WSP".to_string(), "   ".to_string(), None).is_err());
+    }
+
+    #[test]
+    fn trusted_peer_lookup_is_case_insensitive_and_normalizes_on_write() {
+        let conn = fresh_db();
+        add_trusted_peer_conn(&conn, "k7wsp".to_string(), "their-secret".to_string(), None).unwrap();
+        assert_eq!(trusted_peer_secret(&conn, "K7WSP").as_deref(), Some("their-secret"));
+        assert_eq!(trusted_peer_secret(&conn, "k7wsp").as_deref(), Some("their-secret"));
+        assert_eq!(trusted_peer_secret(&conn, "unknown-station"), None);
+    }
+
+    #[test]
+    fn adding_a_trusted_peer_twice_updates_rather_than_duplicates() {
+        let conn = fresh_db();
+        add_trusted_peer_conn(&conn, "K7WSP".to_string(), "old-secret".to_string(), None).unwrap();
+        add_trusted_peer_conn(&conn, "K7WSP".to_string(), "new-secret".to_string(), Some("rotated".to_string())).unwrap();
+        assert_eq!(get_trusted_peers_conn(&conn).len(), 1, "re-adding the same callsign must update, not duplicate");
+        assert_eq!(trusted_peer_secret(&conn, "K7WSP").as_deref(), Some("new-secret"));
+    }
+
+    #[test]
+    fn deleting_a_trusted_peer_removes_it() {
+        let conn = fresh_db();
+        let peer = add_trusted_peer_conn(&conn, "K7WSP".to_string(), "their-secret".to_string(), None).unwrap();
+        delete_trusted_peer_conn(&conn, peer.id);
+        assert!(get_trusted_peers_conn(&conn).is_empty());
     }
 }

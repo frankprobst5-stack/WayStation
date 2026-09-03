@@ -19,8 +19,12 @@
 //! future work, not something this pass tries to cover.
 
 use crate::db::{self, MapMarker, Message};
+use hmac::{Hmac, Mac};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// WSP/1 -- the WayStation Interchange Protocol, version 1. "Version 1"
 /// specifically because every file this module writes was, until now, a
@@ -56,7 +60,37 @@ pub enum ObjectKind {
 #[serde(tag = "wsp_kind", rename_all = "snake_case")]
 pub enum WspEnvelope {
     Manifest { wsp_version: u8, origin_callsign: Option<String>, generated_at: String, entries: Vec<ManifestEntry> },
-    Objects { wsp_version: u8, origin_callsign: Option<String>, generated_at: String, entries: Vec<SyncObject> },
+    /// `signature` is new as of 2026-09-03 and deliberately additive,
+    /// not a version bump: `#[serde(default)]` means a WSP/1 file
+    /// written before signing existed still parses cleanly, just with
+    /// `signature: None` -- read as "unsigned," not rejected. A
+    /// manifest carries no content worth forging, so only Objects
+    /// (what actually gets merged into the local database) gets one.
+    Objects { wsp_version: u8, origin_callsign: Option<String>, generated_at: String, entries: Vec<SyncObject>, #[serde(default)] signature: Option<String> },
+}
+
+/// HMAC-SHA256 over everything in an Objects envelope except the
+/// signature field itself -- both `wrap_objects` (signing) and
+/// `verify_objects_signature` (checking) build this exact same byte
+/// string, so any change to `entries`, `origin_callsign`, or
+/// `generated_at` after signing invalidates the signature. `SignablePayload`
+/// exists only to get a fixed, deterministic field order out of serde_json
+/// independent of `WspEnvelope`'s own shape (which does carry a
+/// signature field once populated).
+#[derive(Serialize)]
+struct SignablePayload<'a> {
+    wsp_version: u8,
+    origin_callsign: &'a Option<String>,
+    generated_at: &'a str,
+    entries: &'a [SyncObject],
+}
+
+fn compute_signature(secret: &str, wsp_version: u8, origin_callsign: &Option<String>, generated_at: &str, entries: &[SyncObject]) -> String {
+    let payload = SignablePayload { wsp_version, origin_callsign, generated_at, entries };
+    let bytes = serde_json::to_vec(&payload).expect("signable payload must serialize");
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(&bytes);
+    format!("{:x}", mac.finalize().into_bytes())
 }
 
 fn wrap_manifest(conn: &Connection, entries: Vec<ManifestEntry>) -> WspEnvelope {
@@ -68,12 +102,63 @@ fn wrap_manifest(conn: &Connection, entries: Vec<ManifestEntry>) -> WspEnvelope 
     }
 }
 
+/// Signs with this station's own secret if one has been generated
+/// (`get_or_create_signing_secret`) -- if not, the export still
+/// produces a valid WSP/1 file, just an honestly unsigned one, same as
+/// every file this app produced before signing existed.
 fn wrap_objects(conn: &Connection, entries: Vec<SyncObject>) -> WspEnvelope {
-    WspEnvelope::Objects {
-        wsp_version: WSP_VERSION,
-        origin_callsign: db::station_profile(conn).callsign,
-        generated_at: chrono::Utc::now().to_rfc3339(),
-        entries,
+    let origin_callsign = db::station_profile(conn).callsign;
+    let generated_at = chrono::Utc::now().to_rfc3339();
+    let signature = db::station_profile(conn)
+        .signing_secret
+        .map(|secret| compute_signature(&secret, WSP_VERSION, &origin_callsign, &generated_at, &entries));
+    WspEnvelope::Objects { wsp_version: WSP_VERSION, origin_callsign, generated_at, entries, signature }
+}
+
+/// What an operator actually needs to know about an imported file's
+/// authenticity -- surfaced, never silently acted on. Matches this
+/// codebase's standing rule (see `MergeReport::conflicts`): flag, don't
+/// guess. Whether to proceed with a merge despite `UnknownSigner` or
+/// `Invalid` is the operator's call, not something this function
+/// decides for them.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureStatus {
+    /// No `origin_callsign`, or that callsign has no registered secret
+    /// in `trusted_peers` -- this station has never exchanged keys with
+    /// whoever (claims to have) sent this.
+    UnknownSigner,
+    /// The file carries no signature at all -- either the sender never
+    /// generated a signing secret, or (deliberately) this is a WSP/1
+    /// file from before signing existed. Default for `MergeReport`s
+    /// produced without going through envelope-level verification at
+    /// all (`merge_incoming` called directly, as the test suite does).
+    #[default]
+    Unsigned,
+    /// A signature is present, the signer is known, but recomputing it
+    /// with their registered secret doesn't match -- the content was
+    /// altered after signing, or the signer used a different secret
+    /// than the one registered. Treated the same regardless of which:
+    /// either way, this station cannot vouch for this file.
+    Invalid,
+    /// Recomputing the signature with the claimed signer's registered
+    /// secret matches exactly.
+    Verified,
+}
+
+/// Verifies an Objects envelope's signature against this station's
+/// `trusted_peers` registry. Takes the envelope's own fields rather
+/// than the whole `WspEnvelope` so it can't accidentally be called on a
+/// Manifest.
+fn verify_objects_signature(conn: &Connection, wsp_version: u8, origin_callsign: &Option<String>, generated_at: &str, entries: &[SyncObject], signature: &Option<String>) -> SignatureStatus {
+    let Some(signature) = signature else { return SignatureStatus::Unsigned };
+    let Some(callsign) = origin_callsign else { return SignatureStatus::UnknownSigner };
+    let Some(secret) = db::trusted_peer_secret(conn, callsign) else { return SignatureStatus::UnknownSigner };
+    let expected = compute_signature(&secret, wsp_version, origin_callsign, generated_at, entries);
+    if &expected == signature {
+        SignatureStatus::Verified
+    } else {
+        SignatureStatus::Invalid
     }
 }
 
@@ -91,9 +176,18 @@ fn unwrap_manifest(envelope: WspEnvelope) -> Result<Vec<ManifestEntry>, String> 
     }
 }
 
-fn unwrap_objects(envelope: WspEnvelope) -> Result<Vec<SyncObject>, String> {
+/// Version/kind validation plus signature verification in one pass --
+/// takes `conn` to look the claimed signer up in `trusted_peers`.
+/// Returns the entries alongside a `SignatureStatus` rather than
+/// rejecting anything itself on an unverified/invalid signature: what
+/// to do about an untrusted import is the operator's call (surfaced in
+/// `MergeReport`), not something silently decided in the parsing layer.
+fn unwrap_objects(conn: &Connection, envelope: WspEnvelope) -> Result<(Vec<SyncObject>, SignatureStatus), String> {
     match envelope {
-        WspEnvelope::Objects { wsp_version, entries, .. } if wsp_version <= WSP_VERSION => Ok(entries),
+        WspEnvelope::Objects { wsp_version, origin_callsign, generated_at, entries, signature } if wsp_version <= WSP_VERSION => {
+            let status = verify_objects_signature(conn, wsp_version, &origin_callsign, &generated_at, &entries, &signature);
+            Ok((entries, status))
+        }
         WspEnvelope::Objects { wsp_version, .. } => {
             Err(format!("this file uses WSP/{wsp_version}, newer than this WayStation understands (WSP/{WSP_VERSION}) -- update WayStation before importing it"))
         }
@@ -204,6 +298,14 @@ pub struct MergeReport {
     /// certainty the data doesn't support. Surfacing these to an
     /// operator (a real UI for that is future work) beats guessing.
     pub conflicts: Vec<String>,
+    /// Set for a real import (`import_objects_from_file`); stays
+    /// `Unsigned` for the in-process `merge_incoming` calls the test
+    /// suite and `sync_one_direction` use directly, which never go
+    /// through envelope-level verification at all. A merge always
+    /// proceeds regardless of this value -- the operator decides what
+    /// to do with an unverified/invalid import, this struct just makes
+    /// sure they can't miss it.
+    pub signature_status: SignatureStatus,
 }
 
 fn message_content_matches(a: &Message, b: &Message) -> bool {
@@ -305,9 +407,11 @@ pub fn export_objects_to_file(db: tauri::State<db::Db>, remote_manifest_path: St
 pub fn import_objects_from_file(db: tauri::State<db::Db>, path: String) -> Result<MergeReport, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let envelope: WspEnvelope = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    let objects = unwrap_objects(envelope)?;
     let conn = db.0.lock().expect("db mutex poisoned");
-    Ok(merge_incoming(&conn, objects))
+    let (objects, signature_status) = unwrap_objects(&conn, envelope)?;
+    let mut report = merge_incoming(&conn, objects);
+    report.signature_status = signature_status;
+    Ok(report)
 }
 
 // -- Combined single-file exchange --------------------------------------
@@ -559,8 +663,101 @@ mod tests {
         // The real mistake an operator could actually make: picking the
         // wrong file in the Import dialog. This must fail with a message
         // that explains what happened, not a raw deserialize panic.
+        let conn = fresh_db();
         let envelope = WspEnvelope::Manifest { wsp_version: WSP_VERSION, origin_callsign: None, generated_at: "now".to_string(), entries: vec![] };
-        let err = unwrap_objects(envelope).expect_err("a manifest envelope must not be accepted where objects are expected");
+        let err = unwrap_objects(&conn, envelope).expect_err("a manifest envelope must not be accepted where objects are expected");
         assert!(err.contains("manifest"), "error should say what kind of file was actually given: {err}");
+    }
+
+    // -- WSP/1 object signing -------------------------------------------
+
+    fn set_station_identity(conn: &Connection, callsign: &str, signing_secret: Option<&str>) {
+        conn.execute(
+            "INSERT INTO station_profile (id, callsign, signing_secret, updated_at) VALUES (1, ?1, ?2, '2026-09-03T00:00:00Z')
+             ON CONFLICT(id) DO UPDATE SET callsign = excluded.callsign, signing_secret = excluded.signing_secret",
+            rusqlite::params![callsign, signing_secret],
+        )
+        .expect("station_profile insert/update should succeed against the migrated schema");
+    }
+
+    #[test]
+    fn an_export_with_no_signing_secret_configured_is_honestly_unsigned() {
+        let conn = fresh_db();
+        set_station_identity(&conn, "K7WSP", None);
+        db::insert_synced_message(&conn, &make_message("uuid-1", 1, "hello", "hash-1"));
+
+        let envelope = wrap_objects(&conn, export_objects(&conn, &export_manifest(&conn)));
+        match envelope {
+            WspEnvelope::Objects { signature, .. } => assert_eq!(signature, None),
+            WspEnvelope::Manifest { .. } => panic!("wrap_objects must produce an Objects envelope"),
+        }
+    }
+
+    #[test]
+    fn a_correctly_signed_export_verifies_against_the_registered_secret() {
+        let sender = fresh_db();
+        set_station_identity(&sender, "K7WSP", Some("sender-secret-12345"));
+        db::insert_synced_message(&sender, &make_message("uuid-1", 1, "hello", "hash-1"));
+        let envelope = wrap_objects(&sender, export_objects(&sender, &export_manifest(&sender)));
+
+        let receiver = fresh_db();
+        db::add_trusted_peer_conn(&receiver, "K7WSP".to_string(), "sender-secret-12345".to_string(), None).unwrap();
+
+        let (_, status) = unwrap_objects(&receiver, envelope).unwrap();
+        assert_eq!(status, SignatureStatus::Verified);
+    }
+
+    #[test]
+    fn tampering_the_content_after_signing_invalidates_the_signature() {
+        let sender = fresh_db();
+        set_station_identity(&sender, "K7WSP", Some("sender-secret-12345"));
+        db::insert_synced_message(&sender, &make_message("uuid-1", 1, "hello", "hash-1"));
+        let envelope = wrap_objects(&sender, export_objects(&sender, &export_manifest(&sender)));
+
+        // Simulates a file altered in transit (or a forgery attempt): the
+        // signature travels unchanged, but the content it was computed
+        // over does not.
+        let tampered = match envelope {
+            WspEnvelope::Objects { wsp_version, origin_callsign, generated_at, signature, .. } => WspEnvelope::Objects {
+                wsp_version,
+                origin_callsign,
+                generated_at,
+                entries: vec![SyncObject::Message(make_message("uuid-1", 1, "TAMPERED TEXT", "hash-1"))],
+                signature,
+            },
+            WspEnvelope::Manifest { .. } => panic!("wrap_objects must produce an Objects envelope"),
+        };
+
+        let receiver = fresh_db();
+        db::add_trusted_peer_conn(&receiver, "K7WSP".to_string(), "sender-secret-12345".to_string(), None).unwrap();
+        let (_, status) = unwrap_objects(&receiver, tampered).unwrap();
+        assert_eq!(status, SignatureStatus::Invalid);
+    }
+
+    #[test]
+    fn a_signed_export_from_an_unregistered_station_is_flagged_not_silently_trusted() {
+        let sender = fresh_db();
+        set_station_identity(&sender, "K7WSP", Some("sender-secret-12345"));
+        db::insert_synced_message(&sender, &make_message("uuid-1", 1, "hello", "hash-1"));
+        let envelope = wrap_objects(&sender, export_objects(&sender, &export_manifest(&sender)));
+
+        // Receiver has never exchanged keys with K7WSP -- trusted_peers
+        // is empty.
+        let receiver = fresh_db();
+        let (_, status) = unwrap_objects(&receiver, envelope).unwrap();
+        assert_eq!(status, SignatureStatus::UnknownSigner);
+    }
+
+    #[test]
+    fn a_legacy_unsigned_wsp1_file_still_imports_flagged_unsigned_not_rejected() {
+        // A real WSP/1 file written before signing existed has no
+        // `signature` field at all -- `#[serde(default)]` must let it
+        // deserialize cleanly rather than fail to parse.
+        let json = r#"{"wsp_kind":"objects","wsp_version":1,"origin_callsign":"K7WSP","generated_at":"2026-09-01T00:00:00Z","entries":[]}"#;
+        let envelope: WspEnvelope = serde_json::from_str(json).expect("a pre-signing WSP/1 file must still deserialize");
+        let conn = fresh_db();
+        let (objects, status) = unwrap_objects(&conn, envelope).expect("an unsigned envelope must still be accepted, just flagged");
+        assert!(objects.is_empty());
+        assert_eq!(status, SignatureStatus::Unsigned);
     }
 }

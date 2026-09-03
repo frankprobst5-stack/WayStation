@@ -1,6 +1,6 @@
 # WSP/1 — WayStation Interchange Protocol, Version 1
 
-This documents what's actually implemented in `app/src-tauri/src/sync.rs` as of 2026-09-02 — not an aspirational design. Where something is deliberately not built yet, it's named explicitly below rather than left silently absent.
+This documents what's actually implemented in `app/src-tauri/src/sync.rs` as of 2026-09-03 — not an aspirational design. Where something is deliberately not built yet, it's named explicitly below rather than left silently absent.
 
 ## What this is for
 
@@ -26,7 +26,8 @@ Every file this protocol produces is a `WspEnvelope`, never a bare array. Two va
   "wsp_version": 1,
   "origin_callsign": "KJ4ESQ",
   "generated_at": "2026-09-02T14:31:12Z",
-  "entries": [ ... SyncObject ... ]
+  "entries": [ ... SyncObject ... ],
+  "signature": "a3f9...  (or absent/null — see Signing below)"
 }
 ```
 
@@ -68,18 +69,41 @@ Given an incoming object, `merge_incoming` does exactly one of:
 
 Re-running an already-converged exchange is a clean no-op end to end — this is what makes the protocol safe against an interrupted transfer being retried, or the same file being handed to a station twice.
 
+## Signing
+
+Added 2026-09-03. Closes a real gap: anyone can transmit on an open RF path and claim to be any callsign, and until now nothing could tell a genuine object from a forged one.
+
+**Trust model — shared secret per known station, not a PKI.** Each station generates its own signing secret (`get_or_create_signing_secret`, once, on first use — never silently regenerated). The operator shares that secret with people they trust, out-of-band — voice, in person, anything other than the sync channel itself, since sending it alongside the data it's meant to authenticate would defeat the point. Each recipient registers it under the sender's callsign in their own `trusted_peers` table (`add_trusted_peer`). This is deliberately small-circle trust, adequate for a family/friends net where everyone has actually talked to everyone else — it is not designed for an open or public network, and does not by itself prove non-repudiation (anyone holding a station's secret can sign as that station until the secret is rotated; rotation isn't built yet, see below).
+
+**What gets signed.** Only the `Objects` envelope — a `Manifest` carries no content worth forging, nothing from it ever gets merged into a database. The signature is an HMAC-SHA256 over `wsp_version` + `origin_callsign` + `generated_at` + `entries`, computed with the sender's own secret, hex-encoded into the envelope's `signature` field.
+
+**Backward compatible, not a version bump.** `signature` is an additive field (`#[serde(default)]`) — a WSP/1 file written before signing existed still parses cleanly, just with `signature: None`, read honestly as *unsigned* rather than rejected. No `wsp_version` change was needed.
+
+**Verification outcomes (`SignatureStatus`), surfaced not enforced:**
+
+| Status | Meaning |
+|---|---|
+| `verified` | Recomputing the signature with the claimed signer's registered secret matches exactly. |
+| `unsigned` | No signature present at all — sender never generated a secret, or this predates signing. |
+| `unknown_signer` | No `origin_callsign`, or that callsign has no registered secret in `trusted_peers` — this station has never exchanged keys with whoever (claims to have) sent this. |
+| `invalid` | A signature is present, the signer is known, but it doesn't match — the content was altered after signing, or a different secret than the registered one was used. Treated the same regardless of which cause. |
+
+A merge always proceeds regardless of `SignatureStatus` — matching this protocol's standing rule (see "Merge semantics" above): flag, don't guess, and don't silently decide something on the operator's behalf. `import_objects_from_file` returns the status on `MergeReport`, and the Peer Sync panel shows it prominently on every import, `invalid` and `unknown_signer` visually distinct from `verified`. Blocking or requiring an explicit override on an untrusted import is real future work, not built here — this pass gets the *information* in front of the operator honestly; deciding what to do with an unverified import is still on them.
+
+**Explicitly not built:** secret rotation (replacing a compromised or accidentally-shared secret currently means re-distributing a new one to everyone who had the old one, by hand, same as first exchange), per-object signing (only the whole envelope, not each message/marker individually — fine for a file exchange, would matter more once objects move independently over a bandwidth-constrained link), and any enforcement/blocking behavior on a bad signature.
+
 ## What's not in WSP/1
 
 Named explicitly, not silently missing:
 
 - **Compact/binary encoding.** Today's wire format is readable JSON. The original planning notes describe a fragmentable, compressed format for constrained RF links — that's real, deliberately deferred work. Building it now, before any real bandwidth-constrained transport exists to exercise it, would repeat the exact premature-abstraction mistake this codebase already learned not to make once (see `transport.rs`'s own history: a shared `Transport` trait was rightly deferred until there were three real implementations to derive it from, not designed speculatively). When a real constrained-link transport exists, that's WSP/2's job, and the version check above is what makes that a clean upgrade instead of a silent incompatibility.
 - **Fragmentation/reassembly.** Not needed by a file exchange with no message-size limit. Real work once an RF transport with a real payload ceiling (JS8Call, packet) carries this protocol.
-- **Signing / authentication.** Nothing here proves an object actually came from the callsign it claims. Real work, and genuinely worth doing before this protocol is trusted over an open RF path where anyone can transmit.
 - **TTL / multi-hop forwarding.** Today's exchange is strictly station-to-station. A relay/forwarding model for multi-hop mesh delivery is unbuilt.
-- **Object types beyond messages and markers.** Alert, station, person, team, resource, request, assignment, incident, SITREP, acknowledgement, and status-event objects don't have the canonical header yet, so none of them are syncable today.
+- **Object types beyond messages and markers.** Alert, station, team, assignment, acknowledgement, and status-event objects don't have the canonical header yet, so they're not syncable today. (Incident, personnel, resource_request, and SITREP *do* have the header as of Phase D, but aren't wired into `sync.rs`'s `ObjectKind`/`SyncObject` yet — the header existing on a table isn't the same as this protocol knowing how to sync it.)
 
 ## Where this lives in code
 
 - `app/src-tauri/src/sync.rs` — everything above.
-- `app/src/panels/SyncPanel.tsx` — the one current consumer (Settings → Peer Sync).
-- Tests: `sync::tests` — 7 tests covering convergence, staleness, conflict detection, and the envelope itself (round-trip, version rejection, kind-mismatch rejection).
+- `app/src-tauri/src/db.rs` — `signing_secret` (station_profile), `trusted_peers` table and CRUD (v38 migration).
+- `app/src/panels/SyncPanel.tsx` — the one current consumer (Settings → Peer Sync): export/import, signing-secret display, trusted-peer management, signature status on import.
+- Tests: `sync::tests` — 12 tests covering convergence, staleness, conflict detection, the envelope itself, and signing (valid/tampered/unknown-signer/legacy-unsigned). `db::tests` — secret generation/persistence and trusted-peer CRUD.
