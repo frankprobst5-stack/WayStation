@@ -32,12 +32,15 @@ interface DiscoveredPeer {
   callsign: string | null;
   host: string;
   addresses: string[];
+  port: number;
   last_seen: number;
 }
 
 type ExportState = { status: "idle" } | { status: "exporting" } | { status: "done"; count: number; path: string } | { status: "error"; message: string };
 
 type ImportState = { status: "idle" } | { status: "importing" } | { status: "done"; report: MergeReport } | { status: "error"; message: string };
+
+type NetSyncState = { status: "idle" } | { status: "syncing"; instanceName: string } | { status: "done"; instanceName: string; report: MergeReport } | { status: "error"; instanceName: string; message: string };
 
 function SyncPanel() {
   const [exportState, setExportState] = useState<ExportState>({ status: "idle" });
@@ -50,6 +53,7 @@ function SyncPanel() {
   const [peerNotes, setPeerNotes] = useState("");
   const [addingPeer, setAddingPeer] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoveredPeer[]>([]);
+  const [netSyncState, setNetSyncState] = useState<NetSyncState>({ status: "idle" });
 
   async function refreshPeers() {
     setPeers(await invoke<TrustedPeer[]>("get_trusted_peers"));
@@ -100,6 +104,21 @@ function SyncPanel() {
     await refreshPeers();
   }
 
+  function isTrusted(callsign: string | null): boolean {
+    if (!callsign) return false;
+    return peers.some((p) => p.callsign.toUpperCase() === callsign.toUpperCase());
+  }
+
+  async function syncViaNetwork(peer: DiscoveredPeer) {
+    setNetSyncState({ status: "syncing", instanceName: peer.instance_name });
+    try {
+      const report = await invoke<MergeReport>("sync_with_peer", { host: peer.host, port: peer.port });
+      setNetSyncState({ status: "done", instanceName: peer.instance_name, report });
+    } catch (err) {
+      setNetSyncState({ status: "error", instanceName: peer.instance_name, message: String(err) });
+    }
+  }
+
   async function exportBundle() {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const path = await save({
@@ -146,20 +165,41 @@ function SyncPanel() {
         </div>
         <p className="field-hint">
           Other WayStation stations found on the local network via mDNS — informational only. Discovery never moves
-          any data on its own; nothing here is clickable to sync. If you want to exchange data with one of these
-          stations, use Export/Import below, same as with anyone else.
+          any data on its own. A Sync button only appears for a station whose callsign you've already added as a
+          Trusted Peer below, with a secret they gave you — everyone else stays read-only here. Connecting still
+          requires them to trust you back the same way; an untrusted connection is rejected before any data moves.
         </p>
         <div className="sync-peer-list">
           {discovered.length === 0 && <div className="sync-peer-empty">No other WayStation stations seen on this network yet.</div>}
-          {discovered.map((peer) => (
-            <div key={peer.instance_name} className="sync-peer-row">
-              <span className="sync-peer-callsign">{peer.callsign ?? "(no callsign set)"}</span>
-              <span className="sync-peer-notes">
-                {peer.host} — seen {new Date(peer.last_seen * 1000).toLocaleTimeString()}
-              </span>
-            </div>
-          ))}
+          {discovered.map((peer) => {
+            const trusted = isTrusted(peer.callsign);
+            const syncing = netSyncState.status === "syncing" && netSyncState.instanceName === peer.instance_name;
+            return (
+              <div key={peer.instance_name} className="sync-peer-row">
+                <span className="sync-peer-callsign">{peer.callsign ?? "(no callsign set)"}</span>
+                <span className="sync-peer-notes">
+                  {peer.host} — seen {new Date(peer.last_seen * 1000).toLocaleTimeString()}
+                </span>
+                {trusted && (
+                  <button type="button" onClick={() => syncViaNetwork(peer)} disabled={syncing}>
+                    {syncing ? "Syncing…" : "Sync via Network"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
+        {netSyncState.status === "done" && (
+          <div className="sync-result">
+            <div className="field-hint">Network sync with {netSyncState.instanceName}:</div>
+            <ImportReport report={netSyncState.report} />
+          </div>
+        )}
+        {netSyncState.status === "error" && (
+          <div className="sync-result sync-result-error">
+            Network sync with {netSyncState.instanceName} failed: {netSyncState.message}
+          </div>
+        )}
       </div>
 
       <div className="sync-section">

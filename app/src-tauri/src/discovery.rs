@@ -36,6 +36,7 @@ pub struct DiscoveredPeer {
     pub callsign: Option<String>,
     pub host: String,
     pub addresses: Vec<String>,
+    pub port: u16,
     pub last_seen: i64,
 }
 
@@ -54,19 +55,18 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// Builds this station's own advertisement. `port` is a nominal value,
-/// not a live listening socket -- there is no WayStation network sync
-/// server yet (file exchange is still the only real transport, see
-/// sync.rs), so this purely announces presence and a callsign, laying
-/// groundwork for a real sync-over-LAN transport later without
-/// building one now.
+/// Builds this station's own advertisement. `port` is `net_sync`'s real
+/// listener port -- as of 2026-09-03 there genuinely is something
+/// listening there, authenticated per-connection (see net_sync.rs's
+/// own doc comment). Advertising it is still just information, not an
+/// invitation: an unauthenticated connection gets nothing back.
 fn build_service_info(callsign: Option<&str>) -> Result<ServiceInfo, String> {
     let hostname = format!("waystation-{}.local.", instance_suffix());
     let properties: Vec<(&str, &str)> = match callsign {
         Some(cs) => vec![("callsign", cs)],
         None => vec![],
     };
-    ServiceInfo::new(SERVICE_TYPE, &instance_suffix(), &hostname, "", DISCOVERY_NOMINAL_PORT, &properties[..])
+    ServiceInfo::new(SERVICE_TYPE, &instance_suffix(), &hostname, "", crate::net_sync::NET_SYNC_PORT, &properties[..])
         .map_err(|e| e.to_string())
         .map(|info| info.enable_addr_auto())
 }
@@ -80,8 +80,6 @@ fn instance_suffix() -> String {
     static SUFFIX: OnceLock<String> = OnceLock::new();
     SUFFIX.get_or_init(|| uuid::Uuid::new_v4().simple().to_string()[..8].to_string()).clone()
 }
-
-const DISCOVERY_NOMINAL_PORT: u16 = 51820;
 
 /// Advertises this station on the LAN. Runs for the life of the app;
 /// re-advertises are handled by `mdns-sd` itself (responds to queries
@@ -164,6 +162,7 @@ fn upsert_peer(peers: &mut Vec<DiscoveredPeer>, info: &ResolvedService) {
         callsign,
         host: info.get_hostname().to_string(),
         addresses: info.get_addresses().iter().map(|a| a.to_string()).collect(),
+        port: info.get_port(),
         last_seen: now(),
     };
     match peers.iter_mut().find(|p| p.instance_name == peer.instance_name) {

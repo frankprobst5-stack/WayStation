@@ -106,7 +106,7 @@ fn wrap_manifest(conn: &Connection, entries: Vec<ManifestEntry>) -> WspEnvelope 
 /// (`get_or_create_signing_secret`) -- if not, the export still
 /// produces a valid WSP/1 file, just an honestly unsigned one, same as
 /// every file this app produced before signing existed.
-fn wrap_objects(conn: &Connection, entries: Vec<SyncObject>) -> WspEnvelope {
+pub(crate) fn wrap_objects(conn: &Connection, entries: Vec<SyncObject>) -> WspEnvelope {
     let origin_callsign = db::station_profile(conn).callsign;
     let generated_at = chrono::Utc::now().to_rfc3339();
     let signature = db::station_profile(conn)
@@ -182,7 +182,7 @@ fn unwrap_manifest(envelope: WspEnvelope) -> Result<Vec<ManifestEntry>, String> 
 /// rejecting anything itself on an unverified/invalid signature: what
 /// to do about an untrusted import is the operator's call (surfaced in
 /// `MergeReport`), not something silently decided in the parsing layer.
-fn unwrap_objects(conn: &Connection, envelope: WspEnvelope) -> Result<(Vec<SyncObject>, SignatureStatus), String> {
+pub(crate) fn unwrap_objects(conn: &Connection, envelope: WspEnvelope) -> Result<(Vec<SyncObject>, SignatureStatus), String> {
     match envelope {
         WspEnvelope::Objects { wsp_version, origin_callsign, generated_at, entries, signature } if wsp_version <= WSP_VERSION => {
             let status = verify_objects_signature(conn, wsp_version, &origin_callsign, &generated_at, &entries, &signature);

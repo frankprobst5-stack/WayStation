@@ -8,6 +8,7 @@ mod dxcluster;
 mod js8call;
 mod maidenhead;
 mod mesh;
+mod net_sync;
 mod nws;
 mod pat;
 mod pota;
@@ -96,6 +97,7 @@ pub fn run() {
             app.manage(discovery::DiscoveryState::new());
             discovery::spawn_advertiser(app.handle().clone());
             discovery::spawn_browser(app.handle().clone());
+            net_sync::spawn_listener(app.handle().clone());
             connectivity::spawn_poller(app.handle().clone());
             nws::spawn_poller(app.handle().clone());
             space_weather::spawn_poller(app.handle().clone());
@@ -159,6 +161,7 @@ pub fn run() {
             sync::import_objects_from_file,
             sync::export_full_bundle_to_file,
             discovery::get_discovered_peers,
+            net_sync::sync_with_peer,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

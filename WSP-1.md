@@ -1,10 +1,24 @@
 # WSP/1 — WayStation Interchange Protocol, Version 1
 
-This documents what's actually implemented in `app/src-tauri/src/sync.rs` as of 2026-09-03 — not an aspirational design. Where something is deliberately not built yet, it's named explicitly below rather than left silently absent.
+This documents what's actually implemented in `app/src-tauri/src/sync.rs` (and, as of 2026-09-03, `app/src-tauri/src/net_sync.rs`) — not an aspirational design. Where something is deliberately not built yet, it's named explicitly below rather than left silently absent.
 
 ## What this is for
 
-WSP is the wire format two WayStation instances use to exchange operational objects (currently: messages and map markers) and reconcile their local stores without either side trusting the other blindly. It's transport-agnostic by design — the reconciliation logic (`export_manifest`, `uuids_needed_from`, `export_objects`, `merge_incoming`) operates on plain Rust data with no assumption about how the bytes actually moved between two stations. File exchange is the first real transport (see `export_manifest_to_file`, `import_objects_from_file`, etc., and the Settings → Peer Sync panel). A local TCP listener, or eventually a real mesh/AREDN link, wraps the exact same functions later — same separation of concerns the `Transport` trait already established for outbound messages.
+WSP is the wire format two WayStation instances use to exchange operational objects (currently: messages and map markers) and reconcile their local stores without either side trusting the other blindly. It's transport-agnostic by design — the reconciliation logic (`export_manifest`, `uuids_needed_from`, `export_objects`, `merge_incoming`) operates on plain Rust data with no assumption about how the bytes actually moved between two stations. Two real transports exist today: file exchange (see `export_manifest_to_file`, `import_objects_from_file`, etc., and the Settings → Peer Sync panel) and, as of 2026-09-03, an authenticated TCP transport (`net_sync.rs`, see "Transports" below) — both wrap the exact same reconciliation functions, same separation of concerns the `Transport` trait already established for outbound messages.
+
+## Transports
+
+**File exchange.** An operator exports to a file and hands it to the other station however they choose (USB drive, LAN share, etc.). The physical act of handing over the file *is* the consent — there's no separate authentication step, because there doesn't need to be one.
+
+**TCP (`net_sync.rs`), added 2026-09-03.** A live network connection has no equivalent physical gesture, so it needs its own explicit gate: a connecting station must prove it knows a secret this station has already agreed to trust, or it gets nothing. Discovery (`discovery.rs`, mDNS) can tell an operator a station exists on the network; it is deliberately not permission to sync with it — see `ROADMAP.md`'s second non-negotiable principle. Concretely:
+
+1. Client connects and sends `Hello { callsign, nonce, signature }`, where `signature` is an HMAC of `nonce` computed with the client's own signing secret (the same secret from "Signing" above).
+2. Server looks up `callsign` in its `trusted_peers` table. No entry, or the signature doesn't match that entry's registered secret → `Rejected`, connection closed, nothing else exchanged. This is a real access-control gate, not just after-the-fact provenance checking — an unauthorized connection never sees a manifest, let alone object content.
+3. On `Accepted`, both sides run the identical bidirectional exchange: swap manifests, swap requests for what each is missing, each side answers the other's request (objects signed the same way file exports are, via the same `wrap_objects`), each side merges what it receives.
+
+This is on-demand, not automatic — an operator has to click "Sync via Network" for one specific, already-trusted station in the Peer Sync panel. Nothing polls or schedules a sync in the background; that's the separately-tracked, not-yet-built "Automated background sync loop."
+
+**Trust model limits, same as signing:** shared-secret-per-known-station, not a PKI. Adequate for a small, mutually-known circle. The nonce-signature handshake has no server-issued challenge (the client picks its own nonce) — fine for this trust model, but worth naming: it doesn't defend against a sophisticated replay attack the way a server-issued challenge would. Real work if this protocol is ever exposed beyond a trusted LAN.
 
 ## The envelope
 
@@ -103,7 +117,9 @@ Named explicitly, not silently missing:
 
 ## Where this lives in code
 
-- `app/src-tauri/src/sync.rs` — everything above.
+- `app/src-tauri/src/sync.rs` — the envelope, reconciliation logic, signing, and the file transport.
+- `app/src-tauri/src/net_sync.rs` — the TCP transport and its authentication handshake.
+- `app/src-tauri/src/discovery.rs` — mDNS peer discovery (not part of WSP/1 itself; a separate concern that feeds `net_sync.rs` an address to connect to).
 - `app/src-tauri/src/db.rs` — `signing_secret` (station_profile), `trusted_peers` table and CRUD (v38 migration).
-- `app/src/panels/SyncPanel.tsx` — the one current consumer (Settings → Peer Sync): export/import, signing-secret display, trusted-peer management, signature status on import.
-- Tests: `sync::tests` — 12 tests covering convergence, staleness, conflict detection, the envelope itself, and signing (valid/tampered/unknown-signer/legacy-unsigned). `db::tests` — secret generation/persistence and trusted-peer CRUD.
+- `app/src/panels/SyncPanel.tsx` — the one current consumer (Settings → Peer Sync): export/import, signing-secret display, trusted-peer management, discovered-peers list, "Sync via Network," signature status on every import regardless of transport.
+- Tests: `sync::tests` — 12 tests covering convergence, staleness, conflict detection, the envelope itself, and signing (valid/tampered/unknown-signer/legacy-unsigned). `net_sync::tests` — 6 tests covering the auth handshake (accept/reject cases) and a real bidirectional convergence over an actual TCP socket on loopback. `discovery::tests` — 1 test, real advertise-then-browse over loopback. `db::tests` — secret generation/persistence and trusted-peer CRUD.
