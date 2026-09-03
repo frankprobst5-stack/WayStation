@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 // Mirrors sync::SignatureStatus.
@@ -25,6 +26,15 @@ interface TrustedPeer {
   notes: string | null;
 }
 
+// Mirrors discovery::DiscoveredPeer.
+interface DiscoveredPeer {
+  instance_name: string;
+  callsign: string | null;
+  host: string;
+  addresses: string[];
+  last_seen: number;
+}
+
 type ExportState = { status: "idle" } | { status: "exporting" } | { status: "done"; count: number; path: string } | { status: "error"; message: string };
 
 type ImportState = { status: "idle" } | { status: "importing" } | { status: "done"; report: MergeReport } | { status: "error"; message: string };
@@ -39,13 +49,24 @@ function SyncPanel() {
   const [peerSecret, setPeerSecret] = useState("");
   const [peerNotes, setPeerNotes] = useState("");
   const [addingPeer, setAddingPeer] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredPeer[]>([]);
 
   async function refreshPeers() {
     setPeers(await invoke<TrustedPeer[]>("get_trusted_peers"));
   }
 
+  async function refreshDiscovered() {
+    setDiscovered(await invoke<DiscoveredPeer[]>("get_discovered_peers"));
+  }
+
   useEffect(() => {
     refreshPeers();
+    refreshDiscovered();
+    let unlisten: (() => void) | undefined;
+    listen("discovered-peers-changed", refreshDiscovered).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
   }, []);
 
   async function revealMySecret() {
@@ -118,6 +139,28 @@ function SyncPanel() {
         export here, import there, and vice versa to sync both ways. Every object keeps its own identity and edit
         history, so importing the same file twice, or importing after you're already caught up, changes nothing.
       </p>
+
+      <div className="sync-section">
+        <div className="sync-section-head">
+          <h3>Discovered on This Network</h3>
+        </div>
+        <p className="field-hint">
+          Other WayStation stations found on the local network via mDNS — informational only. Discovery never moves
+          any data on its own; nothing here is clickable to sync. If you want to exchange data with one of these
+          stations, use Export/Import below, same as with anyone else.
+        </p>
+        <div className="sync-peer-list">
+          {discovered.length === 0 && <div className="sync-peer-empty">No other WayStation stations seen on this network yet.</div>}
+          {discovered.map((peer) => (
+            <div key={peer.instance_name} className="sync-peer-row">
+              <span className="sync-peer-callsign">{peer.callsign ?? "(no callsign set)"}</span>
+              <span className="sync-peer-notes">
+                {peer.host} — seen {new Date(peer.last_seen * 1000).toLocaleTimeString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="sync-section">
         <div className="sync-section-head">

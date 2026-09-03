@@ -2,6 +2,7 @@ mod backup;
 mod connectivity;
 mod contest_calendar;
 mod db;
+mod discovery;
 mod dispatch;
 mod dxcluster;
 mod js8call;
@@ -92,6 +93,9 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
             app.manage(pat::PatProcess(Mutex::new(None)));
             app.manage(mesh::MeshState::new());
+            app.manage(discovery::DiscoveryState::new());
+            discovery::spawn_advertiser(app.handle().clone());
+            discovery::spawn_browser(app.handle().clone());
             connectivity::spawn_poller(app.handle().clone());
             nws::spawn_poller(app.handle().clone());
             space_weather::spawn_poller(app.handle().clone());
@@ -154,6 +158,7 @@ pub fn run() {
             sync::export_objects_to_file,
             sync::import_objects_from_file,
             sync::export_full_bundle_to_file,
+            discovery::get_discovered_peers,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

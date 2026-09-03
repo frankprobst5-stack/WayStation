@@ -36,6 +36,14 @@ roxmltree = "0.21.1"
 sgp4 = "2.4"
 sha2 = "0.10"
 hmac = "0.12"
+# default-features off deliberately drops the optional `async` feature
+# (an async wrapper around this crate's own channel type, not a tokio
+# dependency either way) -- same "no second concurrency model for one
+# integration" reasoning as the meshtastic crate above. This crate's
+# core is synchronous by design ("no async runtime dependency," per
+# its own description), matching every other transport in this
+# codebase.
+mdns-sd = { version = "0.21", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 # default-features off deliberately drops the tokio requirement -- every
 # other transport in this codebase (Pat, JS8Call, DX cluster) is
