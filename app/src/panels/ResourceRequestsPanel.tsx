@@ -22,6 +22,9 @@ interface ResourceRequest {
   fulfilled_at: string | null;
   revision: number;
   trust_state: string;
+  grid_square: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 interface Incident {
@@ -41,6 +44,54 @@ const STATUS_LABELS: Record<string, string> = {
   fulfilled: "Fulfilled",
   cancelled: "Cancelled",
 };
+
+/** Same distinction as personnel's grid square field: `location` is free
+ * text ("north shelter"), `grid_square` is what actually plots a pin. */
+function GridSquareField({
+  requestId,
+  value,
+  plottable,
+  onSaved,
+}: {
+  requestId: number;
+  value: string | null;
+  plottable: boolean;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await invoke("set_resource_request_location", { requestId, gridSquare: draft.trim() || null });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="resource-request-grid-square">
+      <input
+        type="text"
+        placeholder="Grid square"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && save()}
+        className={draft && !plottable ? "grid-square-unplottable" : undefined}
+      />
+      <button type="button" onClick={save} disabled={saving || draft.trim() === (value ?? "")}>
+        {saving ? "…" : "Set"}
+      </button>
+      {draft && !plottable && <span className="grid-square-warning">not on map</span>}
+    </span>
+  );
+}
 
 function ResourceRequestsPanel() {
   const [requests, setRequests] = useState<ResourceRequest[]>([]);
@@ -151,6 +202,7 @@ function ResourceRequestsPanel() {
                 </option>
               ))}
             </select>
+            <GridSquareField requestId={req.id} value={req.grid_square} plottable={req.latitude !== null} onSaved={refresh} />
           </div>
         ))}
       </div>

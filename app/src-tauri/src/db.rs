@@ -466,11 +466,18 @@ pub struct Person {
     pub updated_at: String,
     pub revision: i64,
     pub trust_state: String,
+    // Not stored -- derived from `grid_square` at read time, same
+    // pattern as `Resource`. See the v37 migration comment.
+    pub grid_square: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
-const PERSON_COLUMNS: &str = "id, uuid, callsign, name, role, status, location, incident_id, created_at, updated_at, revision, trust_state";
+const PERSON_COLUMNS: &str = "id, uuid, callsign, name, role, status, location, incident_id, created_at, updated_at, revision, trust_state, grid_square";
 
 fn person_from_row(row: &rusqlite::Row) -> rusqlite::Result<Person> {
+    let grid_square: Option<String> = row.get(12)?;
+    let coords = grid_square.as_deref().and_then(grid_square_to_lat_lon);
     Ok(Person {
         id: row.get(0)?,
         uuid: row.get(1)?,
@@ -484,6 +491,9 @@ fn person_from_row(row: &rusqlite::Row) -> rusqlite::Result<Person> {
         updated_at: row.get(9)?,
         revision: row.get(10)?,
         trust_state: row.get(11)?,
+        grid_square,
+        latitude: coords.map(|(lat, _)| lat),
+        longitude: coords.map(|(_, lon)| lon),
     })
 }
 
@@ -509,6 +519,9 @@ fn create_person_conn(conn: &Connection, callsign: Option<String>, name: String,
         updated_at: now,
         revision: 1,
         trust_state: "local".to_string(),
+        grid_square: None,
+        latitude: None,
+        longitude: None,
     }
 }
 
@@ -567,6 +580,30 @@ fn set_person_status_conn(conn: &Connection, person_id: i64, status: String) -> 
 pub fn set_person_status(db: State<Db>, person_id: i64, status: String) -> Result<Person, String> {
     let conn = db.0.lock().expect("db mutex poisoned");
     set_person_status_conn(&conn, person_id, status)
+}
+
+/// Sets (or, when `grid_square` is `None`, clears) where this person
+/// plots on the Tactical Map. Doesn't validate the square parses --
+/// `grid_square_to_lat_lon` already returns `None` for garbage input at
+/// read time, so an unparsable square just means no pin, not a write
+/// failure. That matches how the `resources` board already handles it.
+fn set_person_location_conn(conn: &Connection, person_id: i64, grid_square: Option<String>) -> Result<Person, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE personnel SET grid_square = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3",
+        params![grid_square, now, person_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {PERSON_COLUMNS} FROM personnel WHERE id = ?1"), params![person_id], person_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "person not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_person_location(db: State<Db>, person_id: i64, grid_square: Option<String>) -> Result<Person, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_person_location_conn(&conn, person_id, grid_square)
 }
 
 /// Assigns (or, when `incident_id` is None, clears) which incident this
@@ -628,12 +665,19 @@ pub struct ResourceRequest {
     pub fulfilled_at: Option<String>,
     pub revision: i64,
     pub trust_state: String,
+    // Not stored -- derived from `grid_square` at read time, same
+    // pattern as `Resource`/`Person`. See the v37 migration comment.
+    pub grid_square: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 const RESOURCE_REQUEST_COLUMNS: &str =
-    "id, uuid, incident_id, resource_type, description, quantity, location, priority, status, requested_by, needed_by, created_at, updated_at, fulfilled_at, revision, trust_state";
+    "id, uuid, incident_id, resource_type, description, quantity, location, priority, status, requested_by, needed_by, created_at, updated_at, fulfilled_at, revision, trust_state, grid_square";
 
 fn resource_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<ResourceRequest> {
+    let grid_square: Option<String> = row.get(16)?;
+    let coords = grid_square.as_deref().and_then(grid_square_to_lat_lon);
     Ok(ResourceRequest {
         id: row.get(0)?,
         uuid: row.get(1)?,
@@ -651,6 +695,9 @@ fn resource_request_from_row(row: &rusqlite::Row) -> rusqlite::Result<ResourceRe
         fulfilled_at: row.get(13)?,
         revision: row.get(14)?,
         trust_state: row.get(15)?,
+        grid_square,
+        latitude: coords.map(|(lat, _)| lat),
+        longitude: coords.map(|(_, lon)| lon),
     })
 }
 
@@ -703,6 +750,9 @@ fn create_resource_request_conn(
         fulfilled_at: None,
         revision: 1,
         trust_state: "local".to_string(),
+        grid_square: None,
+        latitude: None,
+        longitude: None,
     })
 }
 
@@ -787,6 +837,28 @@ fn set_resource_request_status_conn(conn: &Connection, request_id: i64, status: 
 pub fn set_resource_request_status(db: State<Db>, request_id: i64, status: String) -> Result<ResourceRequest, String> {
     let conn = db.0.lock().expect("db mutex poisoned");
     set_resource_request_status_conn(&conn, request_id, status)
+}
+
+/// Sets (or clears) where this request plots on the Tactical Map. See
+/// `set_person_location_conn` -- same reasoning, same non-validating
+/// behavior on unparsable input.
+fn set_resource_request_location_conn(conn: &Connection, request_id: i64, grid_square: Option<String>) -> Result<ResourceRequest, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE resource_requests SET grid_square = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3",
+        params![grid_square, now, request_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row(&format!("SELECT {RESOURCE_REQUEST_COLUMNS} FROM resource_requests WHERE id = ?1"), params![request_id], resource_request_from_row)
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "resource request not found".to_string())
+}
+
+#[tauri::command]
+pub fn set_resource_request_location(db: State<Db>, request_id: i64, grid_square: Option<String>) -> Result<ResourceRequest, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_resource_request_location_conn(&conn, request_id, grid_square)
 }
 
 fn set_resource_request_incident_conn(conn: &Connection, request_id: i64, incident_id: Option<String>) -> Result<ResourceRequest, String> {
@@ -3397,6 +3469,21 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_sitreps_incident ON sitreps(incident_id, sequence);
     "#,
+    // v37: tactical-map-by-incident, decided 2026-09-02. The last open
+    // piece of Phase D. `personnel` and `resource_requests` already
+    // carry a free-text `location` field, but free text can't be
+    // plotted -- so this adds `grid_square`, matching the exact
+    // pattern the pre-existing `resources` board already uses (store
+    // the grid square, derive lat/lon at read time via
+    // `grid_square_to_lat_lon` rather than storing raw coordinates
+    // that could silently drift out of sync with the square). Nullable
+    // and separate from `location` on purpose: a request's location
+    // might be known only as "the north shelter" long before anyone
+    // has a grid square for it, and the two shouldn't be conflated.
+    r#"
+    ALTER TABLE personnel ADD COLUMN grid_square TEXT;
+    ALTER TABLE resource_requests ADD COLUMN grid_square TEXT;
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4069,5 +4156,60 @@ mod tests {
         let listed = get_sitreps_conn(&conn, &incident.uuid);
         let sequences: Vec<i64> = listed.iter().map(|s| s.sequence).collect();
         assert_eq!(sequences, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn setting_a_persons_grid_square_derives_real_coordinates() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Test Operator".to_string(), None);
+        assert_eq!(person.grid_square, None);
+        assert_eq!(person.latitude, None);
+
+        let updated = set_person_location_conn(&conn, person.id, Some("EM13".to_string())).unwrap();
+        assert_eq!(updated.grid_square.as_deref(), Some("EM13"));
+        let (lat, lon) = (updated.latitude.unwrap(), updated.longitude.unwrap());
+        // EM13's real centroid -- north Texas, near Denton -- not just "some number".
+        assert!((33.0..34.0).contains(&lat), "lat {lat} out of expected EM13 range");
+        assert!((-98.0..-96.0).contains(&lon), "lon {lon} out of expected EM13 range");
+    }
+
+    #[test]
+    fn an_unparsable_grid_square_stores_the_text_but_derives_no_coordinates() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Test Operator".to_string(), None);
+        let updated = set_person_location_conn(&conn, person.id, Some("not a grid square".to_string())).unwrap();
+        assert_eq!(updated.grid_square.as_deref(), Some("not a grid square"));
+        assert_eq!(updated.latitude, None, "garbage input must not silently produce a plottable pin");
+    }
+
+    #[test]
+    fn clearing_a_persons_grid_square_removes_the_pin() {
+        let conn = fresh_db();
+        let person = create_person_conn(&conn, None, "Test Operator".to_string(), None);
+        set_person_location_conn(&conn, person.id, Some("EM13".to_string())).unwrap();
+        let cleared = set_person_location_conn(&conn, person.id, None).unwrap();
+        assert_eq!(cleared.grid_square, None);
+        assert_eq!(cleared.latitude, None);
+    }
+
+    #[test]
+    fn setting_a_resource_requests_grid_square_derives_real_coordinates() {
+        let conn = fresh_db();
+        let req = create_resource_request_conn(&conn, None, "fuel".to_string(), None, None, None, "routine".to_string(), None, None).unwrap();
+        assert_eq!(req.grid_square, None);
+
+        let updated = set_resource_request_location_conn(&conn, req.id, Some("em13".to_string())).unwrap();
+        assert_eq!(updated.grid_square.as_deref(), Some("em13"));
+        assert!(updated.latitude.is_some(), "lowercase grid squares must still derive coordinates");
+    }
+
+    #[test]
+    fn clearing_a_resource_requests_grid_square_removes_the_pin() {
+        let conn = fresh_db();
+        let req = create_resource_request_conn(&conn, None, "fuel".to_string(), None, None, None, "routine".to_string(), None, None).unwrap();
+        set_resource_request_location_conn(&conn, req.id, Some("EM13".to_string())).unwrap();
+        let cleared = set_resource_request_location_conn(&conn, req.id, None).unwrap();
+        assert_eq!(cleared.grid_square, None);
+        assert_eq!(cleared.latitude, None);
     }
 }

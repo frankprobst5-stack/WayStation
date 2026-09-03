@@ -60,6 +60,34 @@ interface MapMarker {
   dispatch_status: string;
   dispatched_via: string | null;
   received_via: string | null;
+  incident_id: string | null;
+}
+
+interface Incident {
+  id: number;
+  uuid: string;
+  name: string;
+  status: "active" | "closed";
+}
+
+interface Person {
+  id: number;
+  name: string;
+  callsign: string | null;
+  status: string;
+  incident_id: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+interface ResourceRequest {
+  id: number;
+  resource_type: string;
+  description: string | null;
+  status: string;
+  incident_id: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 const MARKER_TYPES = ["hazard", "shelter", "resource", "info"] as const;
@@ -70,6 +98,9 @@ const MARKER_COLORS: Record<string, string> = {
   resource: "#b06fe0",
   info: "#c9a227",
 };
+
+const PERSONNEL_COLOR = "#ff6ec7";
+const RESOURCE_REQUEST_COLOR = "#7c5cff";
 
 function markerStatusText(m: MapMarker): string {
   if (m.received_via) return `received via ${m.received_via}`;
@@ -161,6 +192,9 @@ function TacticalMapPanel() {
   const [ready, setReady] = useState(false);
   const [tileSource, setTileSource] = useState<"citadel" | "online" | null>(null);
 
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [selectedIncident, setSelectedIncident] = useState<string>("all");
+
   const [dropPinMode, setDropPinMode] = useState(false);
   const dropPinModeRef = useRef(false);
   const [pendingCoords, setPendingCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -237,11 +271,13 @@ function TacticalMapPanel() {
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    const [nodes, roster, resources, pins] = await Promise.all([
+    const [nodes, roster, resources, pins, personnel, resourceRequests] = await Promise.all([
       invoke<MeshNode[]>("get_mesh_nodes"),
       invoke<NetRosterEntry[]>("get_net_roster"),
       invoke<Resource[]>("get_resources"),
       invoke<MapMarker[]>("get_markers"),
+      invoke<Person[]>("get_personnel"),
+      invoke<ResourceRequest[]>("get_resource_requests"),
     ]);
 
     const addPin = (lat: number, lon: number, color: string, label: string) => {
@@ -252,6 +288,10 @@ function TacticalMapPanel() {
       markersRef.current.push(marker);
     };
 
+    // Mesh nodes, net check-ins, and the generic resources board aren't
+    // incident objects -- they're standing infrastructure/presence with
+    // no incident_id to filter on -- so they stay visible regardless of
+    // which incident is selected.
     for (const n of nodes) {
       if (n.latitude !== null && n.longitude !== null) {
         addPin(n.latitude, n.longitude, "#ffb000", `Mesh node: ${n.long_name || n.short_name || `!${n.node_num.toString(16)}`}`);
@@ -267,10 +307,32 @@ function TacticalMapPanel() {
         addPin(res.latitude, res.longitude, "#5aa9e6", `Resource: ${res.label}`);
       }
     }
+
+    // Markers, personnel, and resource requests ARE incident objects --
+    // this is the actual "tactical map driven by incident objects"
+    // filtering. "All incidents" shows every one of them that has a
+    // location, same as before this existed; picking a specific
+    // incident narrows each of these three down to just what's tagged
+    // to it.
+    const matchesIncident = (incidentId: string | null) => selectedIncident === "all" || incidentId === selectedIncident;
+
     for (const p of pins) {
+      if (!matchesIncident(p.incident_id)) continue;
       const color = MARKER_COLORS[p.marker_type] || MARKER_COLORS.info;
       const from = p.origin_station ? ` — ${p.origin_station}` : "";
       addPin(p.latitude, p.longitude, color, `${p.label}${from} (${markerStatusText(p)})`);
+    }
+    for (const person of personnel) {
+      if (person.latitude === null || person.longitude === null) continue;
+      if (!matchesIncident(person.incident_id)) continue;
+      const who = person.callsign ? `${person.name} (${person.callsign})` : person.name;
+      addPin(person.latitude, person.longitude, PERSONNEL_COLOR, `Personnel: ${who} — ${person.status}`);
+    }
+    for (const req of resourceRequests) {
+      if (req.latitude === null || req.longitude === null) continue;
+      if (!matchesIncident(req.incident_id)) continue;
+      const detail = req.description ? ` — ${req.description}` : "";
+      addPin(req.latitude, req.longitude, RESOURCE_REQUEST_COLOR, `Resource request: ${req.resource_type}${detail} (${req.status})`);
     }
   }
 
@@ -287,7 +349,11 @@ function TacticalMapPanel() {
       unlisten?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  }, [ready, selectedIncident]);
+
+  useEffect(() => {
+    invoke<Incident[]>("get_incidents").then(setIncidents);
+  }, []);
 
   async function submitPin(e: React.FormEvent) {
     e.preventDefault();
@@ -333,6 +399,20 @@ function TacticalMapPanel() {
         >
           {dropPinMode ? "Click the map to place a pin…" : "Drop Pin"}
         </button>
+        <select
+          className="tactical-map-incident-select"
+          value={selectedIncident}
+          onChange={(e) => setSelectedIncident(e.target.value)}
+          title="Filter pins, personnel, and resource requests to one incident"
+        >
+          <option value="all">All incidents</option>
+          {incidents.map((incident) => (
+            <option key={incident.uuid} value={incident.uuid}>
+              {incident.name}
+              {incident.status === "closed" ? " (closed)" : ""}
+            </option>
+          ))}
+        </select>
       </div>
 
       {pendingCoords && (
@@ -375,6 +455,12 @@ function TacticalMapPanel() {
             <span className="tactical-map-swatch" style={{ background: MARKER_COLORS[t] }} /> Pin: {t}
           </span>
         ))}
+        <span>
+          <span className="tactical-map-swatch" style={{ background: PERSONNEL_COLOR }} /> Personnel
+        </span>
+        <span>
+          <span className="tactical-map-swatch" style={{ background: RESOURCE_REQUEST_COLOR }} /> Resource requests
+        </span>
         {tileSource && (
           <span className="tactical-map-source">
             Tiles: {tileSource === "citadel" ? "Citadel (local)" : "OpenFreeMap (online)"}

@@ -18,6 +18,9 @@ interface Person {
   updated_at: string;
   revision: number;
   trust_state: string;
+  grid_square: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 interface Incident {
@@ -38,6 +41,56 @@ const STATUS_LABELS: Record<string, string> = {
   off_duty: "Off Duty",
   emergency: "Emergency",
 };
+
+/** Grid square is entered separately from `location` (free text like "the
+ * north shelter") -- this is specifically the field that puts a pin on
+ * the Tactical Map, so it needs its own save action and its own
+ * plottable/not-plottable feedback. */
+function GridSquareField({
+  personId,
+  value,
+  plottable,
+  onSaved,
+}: {
+  personId: number;
+  value: string | null;
+  plottable: boolean;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await invoke("set_person_location", { personId, gridSquare: draft.trim() || null });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="person-grid-square">
+      <input
+        type="text"
+        placeholder="Grid square"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && save()}
+        className={draft && !plottable ? "grid-square-unplottable" : undefined}
+      />
+      <button type="button" onClick={save} disabled={saving || draft.trim() === (value ?? "")}>
+        {saving ? "…" : "Set"}
+      </button>
+      {draft && !plottable && <span className="grid-square-warning">not on map</span>}
+    </span>
+  );
+}
 
 function PersonnelPanel() {
   const [personnel, setPersonnel] = useState<Person[]>([]);
@@ -132,6 +185,7 @@ function PersonnelPanel() {
                 <option value={person.incident_id}>{incidentName(person.incident_id)}</option>
               )}
             </select>
+            <GridSquareField personId={person.id} value={person.grid_square} plottable={person.latitude !== null} onSaved={refresh} />
           </div>
         ))}
       </div>
