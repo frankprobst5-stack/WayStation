@@ -96,6 +96,13 @@ function TabContent({ id }: { id: string }) {
               see that, the software is working.
             </li>
             <li>
+              If a box titled <strong>"Welcome to WayStation"</strong> appears on top of that screen, this station
+              has never been set up. Fill in a callsign and grid square if you know them — the setup only takes a
+              minute and unlocks alerts and a few other panels — or press <strong>Skip for now</strong> at the
+              bottom to get straight to sending messages. This box only appears once; it won't come back once a
+              callsign is saved.
+            </li>
+            <li>
               Look at the bottom-left of that same left column. It should say <strong>CONNECTED</strong> in green.
               If it says <strong>CHECKING</strong> or is red, that's fine — it just means it's still figuring out
               the network. Give it a minute.

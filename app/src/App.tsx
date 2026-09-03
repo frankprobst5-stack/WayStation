@@ -8,7 +8,7 @@ import TacticalModeToggle from "./connectivity/TacticalModeToggle";
 import { startRulesEngine } from "./rules/engine";
 import TimeBar from "./TimeBar";
 import StatusLights from "./StatusLights";
-import FirstRunBanner from "./FirstRunBanner";
+import FirstRunWizard from "./FirstRunWizard";
 import "./App.css";
 
 const TAB_ORDER: PanelCategory[] = [
@@ -50,6 +50,7 @@ function App() {
 
   return (
     <div className="shell">
+      <FirstRunWizard onFinished={() => {}} />
       <nav className="sidebar">
         <div className="sidebar-brand">
           <h1>Waystation</h1>
@@ -76,7 +77,6 @@ function App() {
       </nav>
 
       <div className="shell-main">
-        <FirstRunBanner onGoToSettings={() => setActiveTab("settings")} />
         <div className="shell-topbar">
           <TimeBar />
           <StatusLights />

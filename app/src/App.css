@@ -178,39 +178,113 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.first-run-banner {
+/* First-run setup wizard -- a dismissible overlay, not a blocking one.
+   The dashboard renders underneath it the whole time: someone might
+   need a panel right now, before finishing setup. */
+.wizard-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
-  border-left: 3px solid var(--amber);
-  background: var(--surface-2);
-  font-size: 0.82rem;
-  line-height: 1.5;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
 }
 
-.first-run-banner-actions {
+.wizard-modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 1.5rem;
+  max-width: 460px;
+  width: 100%;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.wizard-modal h2 {
+  margin: 0 0 0.75rem;
+  color: var(--amber);
+  font-size: 1.15rem;
+}
+
+.wizard-modal p {
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.wizard-modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.9rem 0;
+  font-size: 0.82rem;
+}
+
+.wizard-modal input {
+  padding: 0.5em 0.7em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.wizard-progress {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-bottom: 1.1rem;
+}
+
+.wizard-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface-4);
+}
+
+.wizard-progress-dot-done {
+  background: var(--amber);
+}
+
+.wizard-actions {
   display: flex;
   gap: 0.5rem;
-  flex: none;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
 }
 
-.first-run-banner-actions button {
-  padding: 0.35em 0.9em;
+.wizard-actions button {
+  padding: 0.5em 1.1em;
   border-radius: 6px;
   border: 1px solid var(--border-strong);
   background: var(--surface-4);
   color: inherit;
   cursor: pointer;
-  font-size: 0.78rem;
-  white-space: nowrap;
+  font-size: 0.85rem;
 }
 
-.first-run-banner-dismiss {
+.wizard-actions button:not(.wizard-skip):not(:disabled):last-child {
+  background: var(--amber);
+  color: #1a1a1a;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.wizard-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wizard-skip {
   opacity: 0.7;
   background: none !important;
+  margin-right: auto;
 }
 
 .time-bar {
@@ -451,12 +525,14 @@ body {
   border-color: var(--red);
 }
 
-.panel-station-identity .field-error {
+.panel-station-identity .field-error,
+.wizard-modal .field-error {
   color: var(--red);
   font-size: 0.7rem;
 }
 
-.panel-station-identity .field-hint {
+.panel-station-identity .field-hint,
+.wizard-modal .field-hint {
   font-size: 0.7rem;
   opacity: 0.7;
 }
@@ -2677,7 +2753,8 @@ select {
   flex-basis: 100%;
 }
 
-.panel-station-identity .field-warning {
+.panel-station-identity .field-warning,
+.wizard-modal .field-warning {
   display: block;
   margin-top: 0.4rem;
   padding: 0.5rem 0.6rem;
