@@ -1,0 +1,63 @@
+name: CI
+
+# Runs the same checks on every push/PR that have been run by hand
+# before every commit all through Phase A-D: cargo test, cargo check,
+# and a real TypeScript build -- on both platforms WayStation actually
+# ships to (see ROADMAP.md's "Windows/Linux CI" line). Doesn't produce
+# installers -- that's release.yml's job -- this just answers "did the
+# last push break the build or a test" before it reaches main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux webview dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: TypeScript build
+        working-directory: app
+        run: npm run build
+
+      - name: cargo check
+        working-directory: app/src-tauri
+        run: cargo check --all-targets
+
+      - name: cargo test
+        working-directory: app/src-tauri
+        run: cargo test --lib

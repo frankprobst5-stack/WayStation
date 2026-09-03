@@ -1,0 +1,78 @@
+name: Release
+
+# Builds real, installable binaries -- not `cargo build --release`,
+# which is known (the hard way, 2026-08-31) to embed the dev-server URL
+# and ship no bundled frontend. tauri-action runs the actual
+# `tauri build` pipeline on each platform's own runner, since cross-
+# compiling a real installer (.deb/.msi) from one OS for another isn't
+# reliable. Triggered by pushing a version tag, e.g.:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Publishes as a DRAFT release, not a public one -- so a push here
+# can't put an unreviewed build in front of the fleet by accident.
+# Someone still has to open the draft on GitHub and hit Publish.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # .rpm needs rpmbuild, which isn't reliably present on the
+          # hosted runner -- .deb + .AppImage cover the fleet's actual
+          # Debian/Ubuntu-family hardware without depending on that.
+          - platform: ubuntu-22.04
+            args: '--bundles deb,appimage'
+          - platform: windows-latest
+            args: '--bundles msi'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux webview dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build and attach installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: 'WayStation ${{ github.ref_name }}'
+          releaseBody: 'See ROADMAP.md for what changed in this release.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
