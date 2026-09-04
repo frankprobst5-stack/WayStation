@@ -6,6 +6,7 @@ mod db;
 mod discovery;
 mod dispatch;
 mod dxcluster;
+mod flight_tracking;
 mod js8call;
 mod maidenhead;
 mod mesh;
@@ -108,6 +109,7 @@ pub fn run() {
             pskreporter::spawn_poller(app.handle().clone());
             pota::spawn_poller(app.handle().clone());
             dxcluster::spawn_poller(app.handle().clone());
+            flight_tracking::spawn_poller(app.handle().clone());
             satellite::spawn_poller(app.handle().clone());
             mesh::spawn_poller(app.handle().clone());
             pat::spawn_or_restart(app.handle());
@@ -181,6 +183,7 @@ pub fn run() {
             db::get_psk_spots,
             db::get_pota_spots,
             db::get_dx_spots,
+            db::get_aircraft_tracks,
             db::get_satellite_tles,
             db::get_qso_log,
             db::upsert_qso_log_entry,

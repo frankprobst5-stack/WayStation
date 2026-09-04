@@ -28,6 +28,7 @@ import WebSdrPanel from "./WebSdrPanel";
 import ContestCalendarPanel from "./ContestCalendarPanel";
 import PskReporterPanel from "./PskReporterPanel";
 import PotaPanel from "./PotaPanel";
+import FlightTrackingPanel from "./FlightTrackingPanel";
 import DxClusterPanel from "./DxClusterPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
@@ -337,6 +338,16 @@ registerPanel({
   offlineBehavior: "internet-only",
   height: "tall",
   component: PotaPanel,
+});
+
+registerPanel({
+  id: "flight-tracking",
+  title: "Flight Tracking (ADS-B)",
+  category: "emcomm",
+  refreshCadenceSeconds: 5 * 60,
+  offlineBehavior: "internet-only",
+  height: "tall",
+  component: FlightTrackingPanel,
 });
 
 registerPanel({

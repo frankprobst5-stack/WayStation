@@ -2408,6 +2408,96 @@ pub fn replace_pota_spots(conn: &mut Connection, source: &str, fetched_at: &str,
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AircraftTrack {
+    pub id: i64,
+    pub fetched_at: String,
+    pub icao24: String,
+    pub callsign: Option<String>,
+    pub origin_country: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub altitude_m: Option<f64>,
+    pub on_ground: bool,
+    pub velocity_ms: Option<f64>,
+    pub true_track: Option<f64>,
+    pub vertical_rate_ms: Option<f64>,
+    pub squawk: Option<String>,
+    pub last_contact: i64,
+}
+
+#[tauri::command]
+pub fn get_aircraft_tracks(db: State<Db>) -> Vec<AircraftTrack> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, fetched_at, icao24, callsign, origin_country, latitude, longitude, altitude_m,
+                    on_ground, velocity_ms, true_track, vertical_rate_ms, squawk, last_contact
+             FROM aircraft_tracks ORDER BY on_ground ASC, callsign ASC",
+        )
+        .expect("failed to prepare aircraft_tracks query");
+    stmt.query_map([], |row| {
+        Ok(AircraftTrack {
+            id: row.get(0)?,
+            fetched_at: row.get(1)?,
+            icao24: row.get(2)?,
+            callsign: row.get(3)?,
+            origin_country: row.get(4)?,
+            latitude: row.get(5)?,
+            longitude: row.get(6)?,
+            altitude_m: row.get(7)?,
+            on_ground: row.get(8)?,
+            velocity_ms: row.get(9)?,
+            true_track: row.get(10)?,
+            vertical_rate_ms: row.get(11)?,
+            squawk: row.get(12)?,
+            last_contact: row.get(13)?,
+        })
+    })
+    .expect("failed to query aircraft_tracks")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+/// Same replace-on-successful-fetch pattern as `IncomingPotaSpot` --
+/// each poll is a fresh live snapshot of who's in the air right now,
+/// not an accumulating log.
+#[allow(clippy::too_many_arguments)]
+pub struct IncomingAircraftTrack {
+    pub icao24: String,
+    pub callsign: Option<String>,
+    pub origin_country: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub altitude_m: Option<f64>,
+    pub on_ground: bool,
+    pub velocity_ms: Option<f64>,
+    pub true_track: Option<f64>,
+    pub vertical_rate_ms: Option<f64>,
+    pub squawk: Option<String>,
+    pub last_contact: i64,
+}
+
+pub fn replace_aircraft_tracks(conn: &mut Connection, source: &str, fetched_at: &str, tracks: &[IncomingAircraftTrack]) {
+    let tx = conn.transaction().expect("failed to start aircraft_tracks transaction");
+    {
+        tx.execute("DELETE FROM aircraft_tracks WHERE source = ?1", params![source])
+            .expect("failed to clear old aircraft_tracks");
+        for t in tracks {
+            tx.execute(
+                "INSERT INTO aircraft_tracks (source, fetched_at, via, icao24, callsign, origin_country,
+                    latitude, longitude, altitude_m, on_ground, velocity_ms, true_track, vertical_rate_ms,
+                    squawk, last_contact)
+                 VALUES (?1, ?2, 'internet', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![source, fetched_at, t.icao24, t.callsign, t.origin_country, t.latitude, t.longitude,
+                    t.altitude_m, t.on_ground, t.velocity_ms, t.true_track, t.vertical_rate_ms, t.squawk, t.last_contact],
+            )
+            .expect("failed to insert aircraft_track");
+        }
+    }
+    tx.commit().expect("failed to commit aircraft_tracks transaction");
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DxSpot {
     pub id: i64,
     pub fetched_at: String,
@@ -3656,6 +3746,34 @@ const MIGRATIONS: &[&str] = &[
     // discovery never implying sync.
     r#"
     ALTER TABLE trusted_peers ADD COLUMN auto_sync INTEGER NOT NULL DEFAULT 0;
+    "#,
+    // v40: ADS-B flight tracking, decided 2026-09-04 -- the online-first
+    // half of the operator-flagged critical "Flight tracking (ADS-B)"
+    // backlog item (see flight_tracking.rs's own doc comment for the
+    // local-SDR-fallback half that's still genuinely hardware-blocked,
+    // not silently skipped). Same replace-on-successful-fetch pattern
+    // as pota_spots/psk_spots/contests -- a live snapshot, not an
+    // accumulating history; a stale aircraft position is misleading,
+    // not a fact worth keeping around.
+    r#"
+    CREATE TABLE aircraft_tracks (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        source           TEXT NOT NULL,
+        fetched_at       TEXT NOT NULL,
+        via              TEXT NOT NULL,
+        icao24           TEXT NOT NULL,
+        callsign         TEXT,
+        origin_country   TEXT,
+        latitude         REAL,
+        longitude        REAL,
+        altitude_m       REAL,
+        on_ground        INTEGER NOT NULL,
+        velocity_ms      REAL,
+        true_track       REAL,
+        vertical_rate_ms REAL,
+        squawk           TEXT,
+        last_contact     INTEGER NOT NULL
+    );
     "#,
 ];
 
