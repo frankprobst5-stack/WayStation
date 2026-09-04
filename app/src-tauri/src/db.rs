@@ -272,12 +272,16 @@ pub struct TrustedPeer {
     pub shared_secret: String,
     pub added_at: String,
     pub notes: Option<String>,
+    /// Opt-in, separate from trust itself -- see migration v39's own
+    /// comment. Off by default for every peer, including ones added
+    /// before this column existed.
+    pub auto_sync: bool,
 }
 
-const TRUSTED_PEER_COLUMNS: &str = "id, callsign, shared_secret, added_at, notes";
+const TRUSTED_PEER_COLUMNS: &str = "id, callsign, shared_secret, added_at, notes, auto_sync";
 
 fn trusted_peer_from_row(row: &rusqlite::Row) -> rusqlite::Result<TrustedPeer> {
-    Ok(TrustedPeer { id: row.get(0)?, callsign: row.get(1)?, shared_secret: row.get(2)?, added_at: row.get(3)?, notes: row.get(4)? })
+    Ok(TrustedPeer { id: row.get(0)?, callsign: row.get(1)?, shared_secret: row.get(2)?, added_at: row.get(3)?, notes: row.get(4)?, auto_sync: row.get(5)? })
 }
 
 pub fn add_trusted_peer_conn(conn: &Connection, callsign: String, shared_secret: String, notes: Option<String>) -> Result<TrustedPeer, String> {
@@ -335,6 +339,20 @@ fn delete_trusted_peer_conn(conn: &Connection, id: i64) {
 pub fn delete_trusted_peer(db: State<Db>, id: i64) {
     let conn = db.0.lock().expect("db mutex poisoned");
     delete_trusted_peer_conn(&conn, id);
+}
+
+/// A deliberate, separate action from adding a peer at all -- see
+/// migration v39's comment. Toggling this on is the operator saying
+/// "sync with this specific station automatically whenever it's seen
+/// on the network," not merely "I trust what they sign."
+pub(crate) fn set_trusted_peer_auto_sync_conn(conn: &Connection, id: i64, auto_sync: bool) {
+    conn.execute("UPDATE trusted_peers SET auto_sync = ?1 WHERE id = ?2", params![auto_sync, id]).expect("failed to update trusted_peer auto_sync");
+}
+
+#[tauri::command]
+pub fn set_trusted_peer_auto_sync(db: State<Db>, id: i64, auto_sync: bool) {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_trusted_peer_auto_sync_conn(&conn, id, auto_sync);
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -3627,6 +3645,18 @@ const MIGRATIONS: &[&str] = &[
         notes         TEXT
     );
     "#,
+    // v39: automated background sync loop, decided 2026-09-04. Being a
+    // registered trusted peer (enough to click "Sync via Network" by
+    // hand) is deliberately not the same permission as being synced
+    // with unattended, on a timer, without a click every time -- the
+    // backlog item itself named this as the real remaining design
+    // work, not just wrapping net_sync in a loop. `auto_sync` defaults
+    // to 0/off for every existing and newly-added peer; an operator
+    // opts a specific callsign in explicitly, same OPSEC posture as
+    // discovery never implying sync.
+    r#"
+    ALTER TABLE trusted_peers ADD COLUMN auto_sync INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4405,5 +4435,32 @@ mod tests {
         let peer = add_trusted_peer_conn(&conn, "K7WSP".to_string(), "their-secret".to_string(), None).unwrap();
         delete_trusted_peer_conn(&conn, peer.id);
         assert!(get_trusted_peers_conn(&conn).is_empty());
+    }
+
+    #[test]
+    fn a_newly_added_trusted_peer_defaults_to_auto_sync_off() {
+        let conn = fresh_db();
+        let peer = add_trusted_peer_conn(&conn, "K7WSP".to_string(), "their-secret".to_string(), None).unwrap();
+        assert!(!peer.auto_sync, "auto-sync must be an explicit opt-in, never on by default just from being trusted");
+    }
+
+    #[test]
+    fn set_trusted_peer_auto_sync_toggles_only_the_named_peer() {
+        let conn = fresh_db();
+        let a = add_trusted_peer_conn(&conn, "K7WSP".to_string(), "a-secret".to_string(), None).unwrap();
+        let b = add_trusted_peer_conn(&conn, "KJ4ESQ".to_string(), "b-secret".to_string(), None).unwrap();
+        set_trusted_peer_auto_sync_conn(&conn, a.id, true);
+        let peers = get_trusted_peers_conn(&conn);
+        assert!(peers.iter().find(|p| p.id == a.id).unwrap().auto_sync);
+        assert!(!peers.iter().find(|p| p.id == b.id).unwrap().auto_sync);
+    }
+
+    #[test]
+    fn re_adding_a_trusted_peer_with_a_new_secret_does_not_reset_auto_sync() {
+        let conn = fresh_db();
+        let peer = add_trusted_peer_conn(&conn, "K7WSP".to_string(), "old-secret".to_string(), None).unwrap();
+        set_trusted_peer_auto_sync_conn(&conn, peer.id, true);
+        add_trusted_peer_conn(&conn, "K7WSP".to_string(), "new-secret".to_string(), None).unwrap();
+        assert!(get_trusted_peers_conn(&conn)[0].auto_sync, "rotating a peer's secret must not silently turn auto-sync back off");
     }
 }

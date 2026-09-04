@@ -24,6 +24,17 @@ interface TrustedPeer {
   shared_secret: string;
   added_at: string;
   notes: string | null;
+  auto_sync: boolean;
+}
+
+// Mirrors auto_sync::AutoSyncOutcome (internally tagged on "outcome").
+type AutoSyncOutcome = { outcome: "Synced"; inserted: number; updated: number; conflicts: number } | { outcome: "Failed"; reason: string };
+
+// Mirrors auto_sync::AutoSyncRecord.
+interface AutoSyncRecord {
+  callsign: string;
+  attempted_at: number;
+  outcome: AutoSyncOutcome;
 }
 
 // Mirrors discovery::DiscoveredPeer.
@@ -54,6 +65,7 @@ function SyncPanel() {
   const [addingPeer, setAddingPeer] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoveredPeer[]>([]);
   const [netSyncState, setNetSyncState] = useState<NetSyncState>({ status: "idle" });
+  const [autoSyncHistory, setAutoSyncHistory] = useState<AutoSyncRecord[]>([]);
 
   async function refreshPeers() {
     setPeers(await invoke<TrustedPeer[]>("get_trusted_peers"));
@@ -63,14 +75,18 @@ function SyncPanel() {
     setDiscovered(await invoke<DiscoveredPeer[]>("get_discovered_peers"));
   }
 
+  async function refreshAutoSyncHistory() {
+    setAutoSyncHistory(await invoke<AutoSyncRecord[]>("get_auto_sync_history"));
+  }
+
   useEffect(() => {
     refreshPeers();
     refreshDiscovered();
-    let unlisten: (() => void) | undefined;
-    listen("discovered-peers-changed", refreshDiscovered).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
+    refreshAutoSyncHistory();
+    const unlistens: Promise<() => void>[] = [listen("discovered-peers-changed", refreshDiscovered), listen("auto-sync-changed", refreshAutoSyncHistory)];
+    return () => {
+      unlistens.forEach((p) => p.then((fn) => fn()));
+    };
   }, []);
 
   async function revealMySecret() {
@@ -101,6 +117,11 @@ function SyncPanel() {
 
   async function removePeer(id: number) {
     await invoke("delete_trusted_peer", { id });
+    await refreshPeers();
+  }
+
+  async function toggleAutoSync(peer: TrustedPeer) {
+    await invoke("set_trusted_peer_auto_sync", { id: peer.id, autoSync: !peer.auto_sync });
     await refreshPeers();
   }
 
@@ -233,7 +254,10 @@ function SyncPanel() {
         <h4>Trusted Peers</h4>
         <p className="field-hint">
           People who've given you their own signing secret the same way. Register it here under their callsign to
-          verify objects claiming to come from them.
+          verify objects claiming to come from them. Checking "Auto-sync when seen" is a separate decision from
+          trusting them at all — it means this station will sync with them automatically, unattended, every few
+          minutes, whenever they're actually seen on the network. Off by default, even for a peer already trusted
+          enough to click "Sync via Network" by hand.
         </p>
         <div className="sync-peer-list">
           {peers.length === 0 && <div className="sync-peer-empty">No trusted peers registered yet.</div>}
@@ -241,6 +265,10 @@ function SyncPanel() {
             <div key={peer.id} className="sync-peer-row">
               <span className="sync-peer-callsign">{peer.callsign}</span>
               {peer.notes && <span className="sync-peer-notes">{peer.notes}</span>}
+              <label className="sync-auto-toggle">
+                <input type="checkbox" checked={peer.auto_sync} onChange={() => toggleAutoSync(peer)} />
+                Auto-sync when seen
+              </label>
               <button type="button" onClick={() => removePeer(peer.id)}>
                 Remove
               </button>
@@ -255,6 +283,27 @@ function SyncPanel() {
             {addingPeer ? "Adding…" : "Add Trusted Peer"}
           </button>
         </form>
+
+        <h4>Automated Background Sync</h4>
+        <p className="field-hint">
+          Every few minutes, this station checks for peers who are both opted in above and currently seen on the
+          network, and syncs with them automatically — no click needed. Being trusted, even opted in, is never
+          enough on its own; a peer must actually be visible right now. Recent activity:
+        </p>
+        <div className="sync-peer-list">
+          {autoSyncHistory.length === 0 && <div className="sync-peer-empty">No automatic syncs yet.</div>}
+          {[...autoSyncHistory].reverse().map((record, i) => (
+            <div key={i} className="sync-peer-row">
+              <span className="sync-peer-callsign">{record.callsign}</span>
+              <span className="sync-peer-notes">
+                {new Date(record.attempted_at * 1000).toLocaleTimeString()} —{" "}
+                {record.outcome.outcome === "Synced"
+                  ? `${record.outcome.inserted} new, ${record.outcome.updated} updated${record.outcome.conflicts > 0 ? `, ${record.outcome.conflicts} conflicts` : ""}`
+                  : `failed: ${record.outcome.reason}`}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="sync-section">

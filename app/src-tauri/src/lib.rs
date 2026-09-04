@@ -1,3 +1,4 @@
+mod auto_sync;
 mod backup;
 mod connectivity;
 mod contest_calendar;
@@ -95,9 +96,11 @@ pub fn run() {
             app.manage(pat::PatProcess(Mutex::new(None)));
             app.manage(mesh::MeshState::new());
             app.manage(discovery::DiscoveryState::new());
+            app.manage(auto_sync::AutoSyncState::new());
             discovery::spawn_advertiser(app.handle().clone());
             discovery::spawn_browser(app.handle().clone());
             net_sync::spawn_listener(app.handle().clone());
+            auto_sync::spawn_poller(app.handle().clone());
             connectivity::spawn_poller(app.handle().clone());
             nws::spawn_poller(app.handle().clone());
             space_weather::spawn_poller(app.handle().clone());
@@ -122,6 +125,7 @@ pub fn run() {
             db::add_trusted_peer,
             db::get_trusted_peers,
             db::delete_trusted_peer,
+            db::set_trusted_peer_auto_sync,
             db::get_incident_info,
             db::save_incident_info,
             db::create_incident,
@@ -162,6 +166,7 @@ pub fn run() {
             sync::export_full_bundle_to_file,
             discovery::get_discovered_peers,
             net_sync::sync_with_peer,
+            auto_sync::get_auto_sync_history,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

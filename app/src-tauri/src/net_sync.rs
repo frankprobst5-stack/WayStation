@@ -202,34 +202,41 @@ pub fn spawn_listener(app: AppHandle) {
     });
 }
 
-/// The operator-triggered client side: connect to one specific
-/// address, prove identity with this station's own signing secret,
-/// and run the same bidirectional exchange. Returns `MergeReport` --
-/// the same shape `import_objects_from_file` already returns, so the
-/// frontend can reuse its existing result-rendering component.
-#[tauri::command]
-pub fn sync_with_peer(db: tauri::State<Db>, host: String, port: u16) -> Result<MergeReport, String> {
-    let (callsign, secret) = {
-        let conn = db.0.lock().expect("db mutex poisoned");
-        let profile = db::station_profile(&conn);
-        (profile.callsign, profile.signing_secret)
-    };
-    let secret = secret.ok_or("generate this station's own signing secret first (Settings \u{2192} Peer Sync)")?;
+/// Connect to one specific address, prove identity with this station's
+/// own signing secret, and run the same bidirectional exchange.
+/// Returns `MergeReport` -- the same shape `import_objects_from_file`
+/// already returns, so callers can reuse its existing result-rendering.
+/// Takes a plain `&Connection` (the established `_conn` split) so both
+/// the operator-triggered command below and `auto_sync.rs`'s
+/// background poller can drive the exact same connect-and-exchange
+/// logic without either needing a live `State<Db>`.
+pub(crate) fn sync_with_peer_conn(conn: &Connection, host: &str, port: u16) -> Result<MergeReport, String> {
+    let profile = db::station_profile(conn);
+    let secret = profile
+        .signing_secret
+        .ok_or("generate this station's own signing secret first (Settings \u{2192} Peer Sync)")?;
     let nonce = uuid::Uuid::new_v4().to_string();
     let signature = Some(sign_nonce(&secret, &nonce));
 
-    let mut stream = TcpStream::connect((host.as_str(), port)).map_err(|e| format!("could not connect to {host}:{port}: {e}"))?;
-    write_message(&mut stream, &NetSyncMessage::Hello { callsign, nonce, signature })?;
+    let mut stream = TcpStream::connect((host, port)).map_err(|e| format!("could not connect to {host}:{port}: {e}"))?;
+    write_message(&mut stream, &NetSyncMessage::Hello { callsign: profile.callsign, nonce, signature })?;
     match read_message(&mut stream)? {
         NetSyncMessage::Accepted => {}
         NetSyncMessage::Rejected { reason } => return Err(format!("{host}:{port} rejected this connection: {reason}")),
         other => return Err(format!("expected Accepted or Rejected, got {other:?}")),
     }
 
-    let conn = db.0.lock().expect("db mutex poisoned");
-    let report = run_exchange(&mut stream, &conn)?;
+    let report = run_exchange(&mut stream, conn)?;
     let _ = write_message(&mut stream, &NetSyncMessage::Done);
     Ok(report)
+}
+
+/// The operator-triggered client side -- the thin command wrapper
+/// around `sync_with_peer_conn`.
+#[tauri::command]
+pub fn sync_with_peer(db: tauri::State<Db>, host: String, port: u16) -> Result<MergeReport, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    sync_with_peer_conn(&conn, &host, port)
 }
 
 #[cfg(test)]
