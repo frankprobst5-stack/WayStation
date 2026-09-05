@@ -124,6 +124,7 @@ pub fn run() {
             db::get_station_profile,
             db::save_station_profile,
             db::set_tactical_mode,
+            db::set_theme,
             db::get_or_create_signing_secret,
             db::add_trusted_peer,
             db::get_trusted_peers,

@@ -1,13 +1,28 @@
 /* ==========================================================================
    Theme: "command center" — deep charcoal base, amber/Heathkit-green
-   accents. A deliberate identity, not a system-preference dark mode — every
-   reference dashboard hams responded to (see DESIGN.md) was this look, not
-   a toggle. Single theme, not light/dark, on purpose.
+   accents, is the default and primary identity — every reference dashboard
+   hams responded to during initial design was this look, not a toggle.
+
+   Revisited 2026-09-05: real theme selection added after all, per operator
+   request and against that original single-theme call — two real needs
+   justified reversing it rather than just preference. First, an actual
+   night-vision-preservation mode (the "red" theme below) is a genuine
+   EmComm/field-ops feature, not a cosmetic option — it has to be truly
+   monochromatic (every accent recolored into shades of red, distinguished
+   by brightness the way real red-flashlight instrumentation is, not just a
+   red-tinted background) or it doesn't actually preserve night vision.
+   Second, a real light/day-ops mode for bright environments. All three
+   themes below redefine the exact same variable set, driven by
+   `:root[data-theme="dark|light|red"]` (set from `station_profile.theme`,
+   applied in App.tsx on load) — "dark" remains the default a fresh install
+   opens to.
 
    Status-tier colors (green=good/quiet, amber=caution/moderate,
    red=danger/severe) are semantic and reused everywhere — alerts, net
    roster, message precedence, space weather, freshness — for a
-   consistent "read the color, not the text" command-center feel.
+   consistent "read the color, not the text" command-center feel. In the
+   red theme specifically, that same semantic meaning is preserved through
+   brightness/saturation instead of hue, since hue can't vary there.
    ========================================================================== */
 
 :root {
@@ -21,7 +36,10 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+}
 
+:root,
+:root[data-theme="dark"] {
   /* Surfaces */
   --bg-app: #0a0c09;
   --bg-panel: #14170f;
@@ -45,6 +63,9 @@
   --blue: #5aa9e6;
   --gray: #8a8d80;
 
+  /* A dot with no active status -- unlit, not "good." */
+  --status-off: #333333;
+
   /* Translucent amber-tinted overlays, layered on top of --bg-panel for
      rows/chips/buttons/tiles — same technique as before, warm tint instead
      of neutral gray. */
@@ -53,7 +74,77 @@
   --surface-3: rgba(255, 191, 92, 0.11);
   --surface-4: rgba(255, 191, 92, 0.14);
   --surface-5: rgba(255, 191, 92, 0.18);
+}
 
+/* Light (Day Ops) -- bright-environment readability. Same warm-tint
+   philosophy as dark (borders/surfaces stay amber-tinted, not neutral
+   gray), inverted for a light background, with accents deepened/desaturated
+   enough to hold contrast on white rather than washing out. */
+:root[data-theme="light"] {
+  --bg-app: #f4f2ea;
+  --bg-panel: #fbfaf5;
+  --bg-input: #ffffff;
+
+  --text-primary: #22241c;
+  --text-muted: #5c6050;
+
+  --border: rgba(120, 90, 20, 0.18);
+  --border-strong: rgba(120, 90, 20, 0.34);
+
+  --amber: #b8720a;
+  --amber-dim: #8a5a08;
+  --green: #1f9d52;
+  --gold: #a98416;
+  --red: #c22326;
+  --purple: #8e4fd1;
+  --blue: #2f74b8;
+  --gray: #6b6e60;
+
+  --status-off: #cfd0c4;
+
+  --surface-1: rgba(120, 90, 20, 0.04);
+  --surface-2: rgba(120, 90, 20, 0.07);
+  --surface-3: rgba(120, 90, 20, 0.10);
+  --surface-4: rgba(120, 90, 20, 0.13);
+  --surface-5: rgba(120, 90, 20, 0.17);
+}
+
+/* Red (Low-Light) -- genuine night-vision preservation, not a color swap.
+   Every accent below is a shade of red, never another hue: status meaning
+   survives through brightness/saturation only (dim red = good/quiet,
+   medium = caution, brightest/most saturated = danger), the same way real
+   red-lens field instrumentation works. Mixing in green/blue/amber here
+   would defeat the entire point of this theme. */
+:root[data-theme="red"] {
+  --bg-app: #050000;
+  --bg-panel: #140303;
+  --bg-input: #0d0202;
+
+  --text-primary: #e0302a;
+  --text-muted: #8a1f1c;
+
+  --border: rgba(255, 40, 30, 0.18);
+  --border-strong: rgba(255, 40, 30, 0.34);
+
+  --amber: #ff3b2f;
+  --amber-dim: #b8291f;
+  --green: #b23026;
+  --gold: #d43a2e;
+  --red: #ff0000;
+  --purple: #992620;
+  --blue: #c72a20;
+  --gray: #7a2620;
+
+  --status-off: #3a0f0d;
+
+  --surface-1: rgba(255, 40, 30, 0.05);
+  --surface-2: rgba(255, 40, 30, 0.08);
+  --surface-3: rgba(255, 40, 30, 0.11);
+  --surface-4: rgba(255, 40, 30, 0.15);
+  --surface-5: rgba(255, 40, 30, 0.20);
+}
+
+:root {
   color: var(--text-primary);
   background-color: var(--bg-app);
 }
@@ -440,7 +531,7 @@ body {
 }
 
 .tactical-map-pin-toggle.active {
-  background: var(--accent, #c9a227);
+  background: var(--gold);
   color: #1a1a1a;
   border-color: transparent;
 }
@@ -1635,7 +1726,7 @@ select {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #333;
+  background: var(--status-off);
   box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.6);
 }
 
@@ -1655,7 +1746,7 @@ select {
 }
 
 .status-dot.status-off {
-  background: #2a2c26;
+  background: var(--status-off);
   box-shadow: none;
 }
 

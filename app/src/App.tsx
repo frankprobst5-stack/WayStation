@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import "./panels"; // side-effect: registers built-in panels
 import { listPanels } from "./panels";
 import type { PanelCategory } from "./panels";
+import { applyTheme } from "./panels/AppearancePanel";
 import ConnectivityBadge from "./connectivity/ConnectivityBadge";
 import OfflineToggle from "./connectivity/OfflineToggle";
 import TacticalModeToggle from "./connectivity/TacticalModeToggle";
@@ -50,6 +52,7 @@ function App() {
 
   useEffect(() => {
     startRulesEngine();
+    invoke<{ theme: string }>("get_station_profile").then((p) => applyTheme(p.theme ?? "dark"));
   }, []);
 
   const visible = tacticalMode ? panels.filter((p) => !p.hobbyist) : panels;

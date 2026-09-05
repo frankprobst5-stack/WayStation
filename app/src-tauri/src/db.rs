@@ -75,6 +75,12 @@ pub struct StationProfile {
     /// `get_or_create_signing_secret`, carried through unchanged
     /// whenever the Station form saves, never silently regenerated.
     pub signing_secret: Option<String>,
+    /// Display theme -- "dark" (default), "light", or "red" (real
+    /// night-vision preservation, see App.css). Same reasoning as
+    /// `tactical_mode`: a quick mode switch via its own command
+    /// (`set_theme`), not a Station-form field, carried through
+    /// unchanged whenever the Station form saves.
+    pub theme: String,
     pub updated_at: Option<String>,
 }
 
@@ -104,6 +110,7 @@ impl Default for StationProfile {
             tactical_mode: true,
             citadel_map_host: None,
             signing_secret: None,
+            theme: "dark".to_string(),
             updated_at: None,
         }
     }
@@ -111,7 +118,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -128,13 +135,46 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 tactical_mode: row.get::<_, i64>(10)? != 0,
                 citadel_map_host: row.get(11)?,
                 signing_secret: row.get(12)?,
-                updated_at: row.get(13)?,
+                theme: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         },
     )
     .optional()
     .expect("failed to query station_profile")
     .unwrap_or_default()
+}
+
+const VALID_THEMES: [&str; 3] = ["dark", "light", "red"];
+
+/// Own command rather than a Station-form field, same reasoning as
+/// `set_tactical_mode` -- a display preference should apply the instant
+/// it's picked, not require opening Settings and hitting Save. Split into
+/// a testable `_conn` function (the established pattern in this file) so
+/// the validation/persistence logic has real coverage without needing a
+/// live Tauri `State`.
+fn set_theme_conn(conn: &Connection, theme: &str) -> Result<StationProfile, String> {
+    if !VALID_THEMES.contains(&theme) {
+        return Err(format!("unknown theme {theme:?} -- must be one of {VALID_THEMES:?}"));
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute("UPDATE station_profile SET theme = ?1, updated_at = ?2 WHERE id = 1", params![theme, now])
+        .expect("failed to update theme");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute("INSERT INTO station_profile (id, theme, updated_at) VALUES (1, ?1, ?2)", params![theme, now])
+            .expect("failed to create station_profile for theme");
+    }
+    Ok(station_profile(conn))
+}
+
+#[tauri::command]
+pub fn set_theme(db: State<Db>, theme: String) -> Result<StationProfile, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_theme_conn(&conn, &theme)
 }
 
 /// Flips Tactical/Hobbyist Mode. Own command rather than a Station-form
@@ -169,9 +209,9 @@ pub fn get_station_profile(db: State<Db>) -> StationProfile {
     station_profile(&conn)
 }
 
-#[tauri::command]
-pub fn save_station_profile(
-    db: State<Db>,
+#[allow(clippy::too_many_arguments)]
+fn save_station_profile_conn(
+    conn: &Connection,
     callsign: Option<String>,
     grid_square: Option<String>,
     operator_name: Option<String>,
@@ -184,15 +224,15 @@ pub fn save_station_profile(
     citadel_map_host: Option<String>,
 ) -> StationProfile {
     let now = chrono::Utc::now().to_rfc3339();
-    let conn = db.0.lock().expect("db mutex poisoned");
-    // The Station form doesn't own the offline flag, tactical_mode, or
-    // the signing secret -- the header toggle, the mode switch, and
-    // get_or_create_signing_secret respectively do. Carry all three
-    // existing values through rather than clobbering them.
+    // The Station form doesn't own the offline flag, tactical_mode, the
+    // signing secret, or the theme -- the header toggle, the mode switch,
+    // get_or_create_signing_secret, and set_theme respectively do. Carry
+    // all four existing values through rather than clobbering them.
     let existing = station_profile(&conn);
     let manual_offline = existing.manual_offline;
     let tactical_mode = existing.tactical_mode;
     let signing_secret = existing.signing_secret;
+    let theme = existing.theme;
     conn.execute(
         "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, updated_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -226,8 +266,40 @@ pub fn save_station_profile(
         tactical_mode,
         citadel_map_host,
         signing_secret,
+        theme,
         updated_at: Some(now),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn save_station_profile(
+    db: State<Db>,
+    callsign: Option<String>,
+    grid_square: Option<String>,
+    operator_name: Option<String>,
+    repeaterbook_token: Option<String>,
+    mesh_host: Option<String>,
+    rigctld_host: Option<String>,
+    rig_enabled: bool,
+    rotctld_host: Option<String>,
+    rotator_enabled: bool,
+    citadel_map_host: Option<String>,
+) -> StationProfile {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    save_station_profile_conn(
+        &conn,
+        callsign,
+        grid_square,
+        operator_name,
+        repeaterbook_token,
+        mesh_host,
+        rigctld_host,
+        rig_enabled,
+        rotctld_host,
+        rotator_enabled,
+        citadel_map_host,
+    )
 }
 
 /// Generates this station's own WSP/1 signing secret the first time it's
@@ -3898,6 +3970,16 @@ const MIGRATIONS: &[&str] = &[
         detailed_forecast     TEXT
     );
     "#,
+    // v42: display theme, decided 2026-09-05 -- Frank asked to revisit the
+    // earlier single-theme-on-purpose decision (see App.css's own comment)
+    // for two real reasons: a genuine night-vision-preservation mode for
+    // field use, and a light/day-ops mode for bright environments. Own
+    // command (set_theme), not a Station-form field -- same reasoning as
+    // tactical_mode, a display preference should apply the instant it's
+    // picked.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark';
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4083,6 +4165,27 @@ mod tests {
         assert!(!profile.manual_offline);
         assert!(profile.rig_enabled); // migration v21's own stated default
         assert!(profile.rotator_enabled); // migration v22's own stated default
+        assert_eq!(profile.theme, "dark"); // migration v42's own stated default
+    }
+
+    #[test]
+    fn set_theme_rejects_an_unknown_value() {
+        let conn = fresh_db();
+        let err = set_theme_conn(&conn, "neon").unwrap_err();
+        assert!(err.contains("neon"));
+    }
+
+    #[test]
+    fn set_theme_persists_and_survives_a_station_profile_save() {
+        let conn = fresh_db();
+        set_theme_conn(&conn, "red").unwrap();
+
+        // save_station_profile doesn't own theme -- same as tactical_mode
+        // and the signing secret -- so saving the Station form must not
+        // silently reset it back to the default.
+        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None);
+
+        assert_eq!(station_profile(&conn).theme, "red");
     }
 
     // The following round-trip tests target exactly the tables

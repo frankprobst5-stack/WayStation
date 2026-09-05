@@ -1,5 +1,6 @@
 import { registerPanel } from "./registry";
 import StationIdentityPanel from "./StationIdentityPanel";
+import AppearancePanel from "./AppearancePanel";
 import RequiredSoftwarePanel from "./RequiredSoftwarePanel";
 import WorldMapPanel from "./WorldMapPanel";
 import AlertsPanel from "./AlertsPanel";
@@ -425,6 +426,15 @@ registerPanel({
   width: "wide",
   height: "natural",
   component: StationIdentityPanel,
+});
+
+registerPanel({
+  id: "appearance",
+  title: "Appearance",
+  category: "settings",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "always-available",
+  component: AppearancePanel,
 });
 
 registerPanel({
