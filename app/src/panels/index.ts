@@ -88,7 +88,7 @@ registerPanel({
 registerPanel({
   id: "incident-info",
   title: "Situation Summary",
-  category: "emcomm",
+  category: "incident-ops",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   width: "full",
@@ -99,7 +99,7 @@ registerPanel({
 registerPanel({
   id: "incidents",
   title: "Incidents",
-  category: "emcomm",
+  category: "incident-ops",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   width: "wide",
@@ -110,7 +110,7 @@ registerPanel({
 registerPanel({
   id: "personnel",
   title: "Personnel",
-  category: "emcomm",
+  category: "incident-ops",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   width: "wide",
@@ -121,7 +121,7 @@ registerPanel({
 registerPanel({
   id: "resource-requests",
   title: "Resource Requests",
-  category: "emcomm",
+  category: "incident-ops",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   width: "wide",
@@ -132,7 +132,7 @@ registerPanel({
 registerPanel({
   id: "tactical-map",
   title: "Tactical Map",
-  category: "emcomm",
+  category: "tactical-map",
   refreshCadenceSeconds: null,
   offlineBehavior: "degrades",
   width: "full",
@@ -143,7 +143,7 @@ registerPanel({
 registerPanel({
   id: "net-control",
   title: "Net Control",
-  category: "emcomm",
+  category: "messaging",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   width: "wide",
@@ -154,7 +154,7 @@ registerPanel({
 registerPanel({
   id: "messages",
   title: "Messages (ICS-213 / ICS-309)",
-  category: "emcomm",
+  category: "messaging",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   width: "wide",
@@ -165,7 +165,7 @@ registerPanel({
 registerPanel({
   id: "resources",
   title: "Resources",
-  category: "emcomm",
+  category: "incident-ops",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   component: ResourcesPanel,
@@ -174,7 +174,7 @@ registerPanel({
 registerPanel({
   id: "readiness",
   title: "Prepare for Offline",
-  category: "emcomm",
+  category: "incident-ops",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   component: ReadinessPanel,
@@ -345,7 +345,7 @@ registerPanel({
 registerPanel({
   id: "flight-tracking",
   title: "Flight Tracking (ADS-B)",
-  category: "emcomm",
+  category: "flight-tracking",
   refreshCadenceSeconds: 5 * 60,
   offlineBehavior: "internet-only",
   height: "tall",
@@ -355,7 +355,7 @@ registerPanel({
 registerPanel({
   id: "scanner",
   title: "Trunked Scanner (P25)",
-  category: "emcomm",
+  category: "scanner",
   refreshCadenceSeconds: null,
   offlineBehavior: "degrades",
   height: "tall",
@@ -365,7 +365,7 @@ registerPanel({
 registerPanel({
   id: "weather",
   title: "Weather",
-  category: "emcomm",
+  category: "weather",
   refreshCadenceSeconds: 5 * 60,
   offlineBehavior: "internet-only",
   height: "tall",

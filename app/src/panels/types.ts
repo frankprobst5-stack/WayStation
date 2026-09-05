@@ -17,10 +17,21 @@ export type OfflineBehavior = "always-available" | "degrades" | "internet-only";
  * Which tab a panel appears under. Fixed set (not free-form) so the tab bar
  * stays predictable as panels are added — pick the closest fit rather than
  * inventing a new category for one panel.
+ *
+ * "emcomm" was retired 2026-09-05 -- it had grown to 12 stacked panels on
+ * one page (incident ops, the tactical map, flight tracking, the scanner,
+ * weather, all in one scroll) as each got built. Split into one category
+ * per real sub-group instead, matching a flatter sidebar over a few
+ * overloaded tabs -- each of tactical-map/flight-tracking/scanner/weather
+ * is substantial enough to be its own page, not a fragment.
  */
 export type PanelCategory =
   | "dashboard"
-  | "emcomm"
+  | "incident-ops"
+  | "tactical-map"
+  | "flight-tracking"
+  | "scanner"
+  | "weather"
   | "messaging"
   | "activity"
   | "reference"

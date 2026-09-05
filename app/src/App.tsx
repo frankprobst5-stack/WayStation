@@ -13,8 +13,12 @@ import "./App.css";
 
 const TAB_ORDER: PanelCategory[] = [
   "dashboard",
-  "emcomm",
+  "incident-ops",
   "messaging",
+  "tactical-map",
+  "flight-tracking",
+  "scanner",
+  "weather",
   "activity",
   "reference",
   "tools",
@@ -23,8 +27,12 @@ const TAB_ORDER: PanelCategory[] = [
 ];
 const TAB_LABELS: Record<PanelCategory, string> = {
   dashboard: "Dashboard",
-  emcomm: "EmComm",
+  "incident-ops": "Incident Ops",
   messaging: "Messaging",
+  "tactical-map": "Tactical Map",
+  "flight-tracking": "Flight Tracking",
+  scanner: "Scanner",
+  weather: "Weather",
   activity: "Activity",
   reference: "Reference",
   tools: "Tools",

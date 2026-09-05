@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "waystation-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd app && npm run dev"],
+      "port": 1420
+    }
+  ]
+}
