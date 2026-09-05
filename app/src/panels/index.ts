@@ -30,6 +30,7 @@ import PskReporterPanel from "./PskReporterPanel";
 import PotaPanel from "./PotaPanel";
 import FlightTrackingPanel from "./FlightTrackingPanel";
 import ScannerPanel from "./ScannerPanel";
+import WeatherPanel from "./WeatherPanel";
 import DxClusterPanel from "./DxClusterPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
@@ -359,6 +360,16 @@ registerPanel({
   offlineBehavior: "degrades",
   height: "tall",
   component: ScannerPanel,
+});
+
+registerPanel({
+  id: "weather",
+  title: "Weather",
+  category: "emcomm",
+  refreshCadenceSeconds: 5 * 60,
+  offlineBehavior: "internet-only",
+  height: "tall",
+  component: WeatherPanel,
 });
 
 registerPanel({

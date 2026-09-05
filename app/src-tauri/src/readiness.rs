@@ -31,6 +31,7 @@ pub fn prepare_for_offline(app: AppHandle) -> ReadinessReport {
     if !connectivity::is_manual_offline(&app) {
         connectivity::poll_once(&app);
         nws::poll_once(&app);
+        nws::poll_once_forecast(&app);
     }
 
     let db = app.state::<Db>();

@@ -211,6 +211,29 @@ async function probeReachable(url: string): Promise<boolean> {
   }
 }
 
+const RADAR_SOURCE_ID = "rainviewer-radar";
+const RADAR_LAYER_ID = "rainviewer-radar-layer";
+
+/** RainViewer's public tile API -- free, no key, verified live before
+ * building this (a plain fetch against api.rainviewer.com). Returns the
+ * most recent radar frame's tile URL template, or null if RainViewer is
+ * unreachable or the response shape ever changes -- this is a pure
+ * enhancement layer, never something the rest of the map should break
+ * over. */
+async function fetchLatestRadarTileTemplate(): Promise<string | null> {
+  try {
+    const resp = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const frames = data?.radar?.past;
+    if (!Array.isArray(frames) || frames.length === 0) return null;
+    const latest = frames[frames.length - 1];
+    return `${data.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`;
+  } catch {
+    return null;
+  }
+}
+
 function TacticalMapPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -221,6 +244,9 @@ function TacticalMapPanel() {
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<string>("all");
+
+  const [radarOn, setRadarOn] = useState(false);
+  const [radarError, setRadarError] = useState<string | null>(null);
 
   const [dropPinMode, setDropPinMode] = useState(false);
   const dropPinModeRef = useRef(false);
@@ -421,9 +447,41 @@ function TacticalMapPanel() {
     setPinTo("");
   }
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    if (!radarOn) {
+      if (map.getLayer(RADAR_LAYER_ID)) map.removeLayer(RADAR_LAYER_ID);
+      if (map.getSource(RADAR_SOURCE_ID)) map.removeSource(RADAR_SOURCE_ID);
+      setRadarError(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetchLatestRadarTileTemplate().then((template) => {
+      if (cancelled || !mapRef.current) return;
+      if (!template) {
+        setRadarError("Could not reach RainViewer for radar imagery — online only, no offline fallback.");
+        setRadarOn(false);
+        return;
+      }
+      if (!map.getSource(RADAR_SOURCE_ID)) {
+        map.addSource(RADAR_SOURCE_ID, { type: "raster", tiles: [template], tileSize: 256 });
+        map.addLayer({ id: RADAR_LAYER_ID, type: "raster", source: RADAR_SOURCE_ID, paint: { "raster-opacity": 0.6 } });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [radarOn, ready]);
+
   return (
     <div className="panel-tactical-map">
       {mapError && <div className="panel-alerts-empty tactical-map-error">{mapError}</div>}
+      {radarError && <div className="panel-alerts-empty tactical-map-error">{radarError}</div>}
 
       <div className="tactical-map-toolbar">
         <button
@@ -435,6 +493,14 @@ function TacticalMapPanel() {
           }}
         >
           {dropPinMode ? "Click the map to place a pin…" : "Drop Pin"}
+        </button>
+        <button
+          type="button"
+          className={radarOn ? "tactical-map-pin-toggle active" : "tactical-map-pin-toggle"}
+          onClick={() => setRadarOn((v) => !v)}
+          title="RainViewer live radar overlay -- online only, no offline fallback"
+        >
+          {radarOn ? "Hide Radar" : "Show Radar"}
         </button>
         <select
           className="tactical-map-incident-select"

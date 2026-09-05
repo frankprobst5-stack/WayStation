@@ -188,6 +188,7 @@ pub fn run() {
             db::get_pota_spots,
             db::get_dx_spots,
             db::get_aircraft_tracks,
+            db::get_forecast_periods,
             db::get_satellite_tles,
             db::get_qso_log,
             db::upsert_qso_log_entry,

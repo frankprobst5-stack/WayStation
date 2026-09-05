@@ -2498,6 +2498,100 @@ pub fn replace_aircraft_tracks(conn: &mut Connection, source: &str, fetched_at: 
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ForecastPeriod {
+    pub id: i64,
+    pub fetched_at: String,
+    pub period_number: i64,
+    pub name: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub is_daytime: bool,
+    pub temperature: Option<f64>,
+    pub temperature_unit: Option<String>,
+    pub probability_of_precip: Option<f64>,
+    pub wind_speed: Option<String>,
+    pub wind_direction: Option<String>,
+    pub icon: Option<String>,
+    pub short_forecast: Option<String>,
+    pub detailed_forecast: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_forecast_periods(db: State<Db>) -> Vec<ForecastPeriod> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, fetched_at, period_number, name, start_time, end_time, is_daytime, temperature,
+                    temperature_unit, probability_of_precip, wind_speed, wind_direction, icon, short_forecast,
+                    detailed_forecast
+             FROM forecast_periods ORDER BY period_number ASC",
+        )
+        .expect("failed to prepare forecast_periods query");
+    stmt.query_map([], |row| {
+        Ok(ForecastPeriod {
+            id: row.get(0)?,
+            fetched_at: row.get(1)?,
+            period_number: row.get(2)?,
+            name: row.get(3)?,
+            start_time: row.get(4)?,
+            end_time: row.get(5)?,
+            is_daytime: row.get(6)?,
+            temperature: row.get(7)?,
+            temperature_unit: row.get(8)?,
+            probability_of_precip: row.get(9)?,
+            wind_speed: row.get(10)?,
+            wind_direction: row.get(11)?,
+            icon: row.get(12)?,
+            short_forecast: row.get(13)?,
+            detailed_forecast: row.get(14)?,
+        })
+    })
+    .expect("failed to query forecast_periods")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+/// Same replace-on-successful-fetch pattern as `IncomingAircraftTrack` --
+/// each poll is the current forecast, not an accumulating history.
+#[allow(clippy::too_many_arguments)]
+pub struct IncomingForecastPeriod {
+    pub period_number: i64,
+    pub name: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub is_daytime: bool,
+    pub temperature: Option<f64>,
+    pub temperature_unit: Option<String>,
+    pub probability_of_precip: Option<f64>,
+    pub wind_speed: Option<String>,
+    pub wind_direction: Option<String>,
+    pub icon: Option<String>,
+    pub short_forecast: Option<String>,
+    pub detailed_forecast: Option<String>,
+}
+
+pub fn replace_forecast_periods(conn: &mut Connection, source: &str, fetched_at: &str, periods: &[IncomingForecastPeriod]) {
+    let tx = conn.transaction().expect("failed to start forecast_periods transaction");
+    {
+        tx.execute("DELETE FROM forecast_periods WHERE source = ?1", params![source])
+            .expect("failed to clear old forecast_periods");
+        for p in periods {
+            tx.execute(
+                "INSERT INTO forecast_periods (source, fetched_at, via, period_number, name, start_time, end_time,
+                    is_daytime, temperature, temperature_unit, probability_of_precip, wind_speed, wind_direction,
+                    icon, short_forecast, detailed_forecast)
+                 VALUES (?1, ?2, 'internet', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                params![source, fetched_at, p.period_number, p.name, p.start_time, p.end_time, p.is_daytime,
+                    p.temperature, p.temperature_unit, p.probability_of_precip, p.wind_speed, p.wind_direction,
+                    p.icon, p.short_forecast, p.detailed_forecast],
+            )
+            .expect("failed to insert forecast_period");
+        }
+    }
+    tx.commit().expect("failed to commit forecast_periods transaction");
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DxSpot {
     pub id: i64,
     pub fetched_at: String,
@@ -3773,6 +3867,35 @@ const MIGRATIONS: &[&str] = &[
         vertical_rate_ms REAL,
         squawk           TEXT,
         last_contact     INTEGER NOT NULL
+    );
+    "#,
+    // v41: NWS forecast, decided 2026-09-05 -- the first slice of the
+    // 3-tier weather picture Frank asked for (online/RF/local). Same
+    // replace-on-successful-fetch pattern as aircraft_tracks/pota_spots --
+    // a live forecast snapshot, not an accumulating history. Separate
+    // table from `alerts` (nws.rs's existing active-alerts ingest) even
+    // though both come from api.weather.gov -- a forecast period and an
+    // alert are genuinely different objects with different lifecycles,
+    // not two views of the same fact.
+    r#"
+    CREATE TABLE forecast_periods (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        source                TEXT NOT NULL,
+        fetched_at            TEXT NOT NULL,
+        via                   TEXT NOT NULL,
+        period_number         INTEGER NOT NULL,
+        name                  TEXT NOT NULL,
+        start_time            TEXT NOT NULL,
+        end_time              TEXT NOT NULL,
+        is_daytime            INTEGER NOT NULL,
+        temperature           REAL,
+        temperature_unit      TEXT,
+        probability_of_precip REAL,
+        wind_speed            TEXT,
+        wind_direction        TEXT,
+        icon                  TEXT,
+        short_forecast        TEXT,
+        detailed_forecast     TEXT
     );
     "#,
 ];
