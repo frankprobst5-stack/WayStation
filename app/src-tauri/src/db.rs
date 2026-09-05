@@ -6,7 +6,10 @@
 //!
 //!   source      TEXT NOT NULL            -- e.g. "noaa-swpc", "aredn-sysinfo"
 //!   fetched_at  TEXT NOT NULL            -- RFC3339 UTC timestamp
-//!   via         TEXT NOT NULL            -- 'internet' | 'mesh' | 'rf' | 'manual'
+//!   via         TEXT NOT NULL            -- 'internet' | 'mesh' | 'rf' | 'manual' | 'lan'
+//!                                           ('lan': a device on the operator's own local
+//!                                           network, reachable with zero internet -- see
+//!                                           local_weather_observation/weather_station.rs)
 //!
 //! This is what lets every panel show honest data age instead of a blank,
 //! and what lets peer sync reconcile the same fact arriving by two paths.
@@ -69,6 +72,16 @@ pub struct StationProfile {
     /// Map panel; this is the real primary tile source, not the online
     /// OpenFreeMap fallback used when it's unreachable.
     pub citadel_map_host: Option<String>,
+    /// "ecowitt" or "davis_weatherlink_live" -- which local weather
+    /// console API to poll, see weather_station.rs. None means not
+    /// configured, same as every other optional host field here.
+    pub local_weather_brand: Option<String>,
+    /// The console/gateway's own LAN address -- `host` or `host:port`,
+    /// port defaulting to 80 for both supported brands. Unlike
+    /// `citadel_map_host`/`mesh_host`, this never routes through Citadel
+    /// -- the device has its own reachable IP on the home LAN, so
+    /// WayStation polls it directly.
+    pub local_weather_host: Option<String>,
     /// This station's own WSP/1 object-signing secret (HMAC-SHA256 key,
     /// see sync.rs). Not a Station-form field, same reasoning as
     /// `manual_offline`/`tactical_mode` -- generated once via
@@ -109,6 +122,8 @@ impl Default for StationProfile {
             rotator_enabled: true,
             tactical_mode: true,
             citadel_map_host: None,
+            local_weather_brand: None,
+            local_weather_host: None,
             signing_secret: None,
             theme: "dark".to_string(),
             updated_at: None,
@@ -118,7 +133,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -136,7 +151,9 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 citadel_map_host: row.get(11)?,
                 signing_secret: row.get(12)?,
                 theme: row.get(13)?,
-                updated_at: row.get(14)?,
+                local_weather_brand: row.get(14)?,
+                local_weather_host: row.get(15)?,
+                updated_at: row.get(16)?,
             })
         },
     )
@@ -222,6 +239,8 @@ fn save_station_profile_conn(
     rotctld_host: Option<String>,
     rotator_enabled: bool,
     citadel_map_host: Option<String>,
+    local_weather_brand: Option<String>,
+    local_weather_host: Option<String>,
 ) -> StationProfile {
     let now = chrono::Utc::now().to_rfc3339();
     // The Station form doesn't own the offline flag, tactical_mode, the
@@ -234,8 +253,8 @@ fn save_station_profile_conn(
     let signing_secret = existing.signing_secret;
     let theme = existing.theme;
     conn.execute(
-        "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, updated_at)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, local_weather_brand, local_weather_host, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET
             callsign = excluded.callsign,
             grid_square = excluded.grid_square,
@@ -247,8 +266,10 @@ fn save_station_profile_conn(
             rotctld_host = excluded.rotctld_host,
             rotator_enabled = excluded.rotator_enabled,
             citadel_map_host = excluded.citadel_map_host,
+            local_weather_brand = excluded.local_weather_brand,
+            local_weather_host = excluded.local_weather_host,
             updated_at = excluded.updated_at",
-        params![callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled as i64, rotctld_host, rotator_enabled as i64, citadel_map_host, now],
+        params![callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled as i64, rotctld_host, rotator_enabled as i64, citadel_map_host, local_weather_brand, local_weather_host, now],
     )
     .expect("failed to save station_profile");
 
@@ -265,6 +286,8 @@ fn save_station_profile_conn(
         rotator_enabled,
         tactical_mode,
         citadel_map_host,
+        local_weather_brand,
+        local_weather_host,
         signing_secret,
         theme,
         updated_at: Some(now),
@@ -285,6 +308,8 @@ pub fn save_station_profile(
     rotctld_host: Option<String>,
     rotator_enabled: bool,
     citadel_map_host: Option<String>,
+    local_weather_brand: Option<String>,
+    local_weather_host: Option<String>,
 ) -> StationProfile {
     let conn = db.0.lock().expect("db mutex poisoned");
     save_station_profile_conn(
@@ -299,6 +324,8 @@ pub fn save_station_profile(
         rotctld_host,
         rotator_enabled,
         citadel_map_host,
+        local_weather_brand,
+        local_weather_host,
     )
 }
 
@@ -2162,6 +2189,75 @@ pub fn save_space_weather(conn: &Connection, source: &str, fetched_at: &str, sw:
     .expect("failed to save space_weather");
 }
 
+/// A local weather-station console's current reading -- see
+/// weather_station.rs. Singleton row (id=1), same reasoning as
+/// `SpaceWeather`: one station has one local console, not a history of
+/// past readings worth keeping. Fields normalized to US-customary units
+/// (F/mph/inHg) regardless of the source device's own reporting units,
+/// matching NWS forecast's existing convention elsewhere in this app.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LocalWeatherObservation {
+    pub fetched_at: Option<String>,
+    pub source: Option<String>,
+    pub temperature_f: Option<f64>,
+    pub humidity_pct: Option<f64>,
+    pub wind_speed_mph: Option<f64>,
+    pub wind_gust_mph: Option<f64>,
+    pub wind_direction_deg: Option<f64>,
+    pub rain_rate_in_hr: Option<f64>,
+    pub pressure_inhg: Option<f64>,
+}
+
+#[tauri::command]
+pub fn get_local_weather_observation(db: State<Db>) -> LocalWeatherObservation {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    conn.query_row(
+        "SELECT fetched_at, source, temperature_f, humidity_pct, wind_speed_mph, wind_gust_mph,
+                wind_direction_deg, rain_rate_in_hr, pressure_inhg
+         FROM local_weather_observation WHERE id = 1",
+        [],
+        |row| {
+            Ok(LocalWeatherObservation {
+                fetched_at: row.get(0)?,
+                source: row.get(1)?,
+                temperature_f: row.get(2)?,
+                humidity_pct: row.get(3)?,
+                wind_speed_mph: row.get(4)?,
+                wind_gust_mph: row.get(5)?,
+                wind_direction_deg: row.get(6)?,
+                rain_rate_in_hr: row.get(7)?,
+                pressure_inhg: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+    .expect("failed to query local_weather_observation")
+    .unwrap_or_default()
+}
+
+/// `via` is always `'lan'` -- a new, honest fifth value alongside D-004's
+/// documented `internet|mesh|rf|manual` (see this file's own header
+/// comment, updated alongside this). Neither "internet" nor "rf" would be
+/// true here: the whole point of this feature is a real reading that
+/// keeps working with zero internet, over a plain LAN HTTP request to a
+/// device the operator owns.
+pub fn save_local_weather_observation(conn: &Connection, source: &str, fetched_at: &str, obs: &LocalWeatherObservation) {
+    conn.execute(
+        "INSERT INTO local_weather_observation (id, source, fetched_at, via, temperature_f, humidity_pct,
+            wind_speed_mph, wind_gust_mph, wind_direction_deg, rain_rate_in_hr, pressure_inhg)
+         VALUES (1, ?1, ?2, 'lan', ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(id) DO UPDATE SET
+            source = excluded.source, fetched_at = excluded.fetched_at,
+            temperature_f = excluded.temperature_f, humidity_pct = excluded.humidity_pct,
+            wind_speed_mph = excluded.wind_speed_mph, wind_gust_mph = excluded.wind_gust_mph,
+            wind_direction_deg = excluded.wind_direction_deg, rain_rate_in_hr = excluded.rain_rate_in_hr,
+            pressure_inhg = excluded.pressure_inhg",
+        params![source, fetched_at, obs.temperature_f, obs.humidity_pct, obs.wind_speed_mph,
+            obs.wind_gust_mph, obs.wind_direction_deg, obs.rain_rate_in_hr, obs.pressure_inhg],
+    )
+    .expect("failed to save local_weather_observation");
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Channel {
     pub id: i64,
@@ -3980,6 +4076,30 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE station_profile ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark';
     "#,
+    // v43: local weather station (Ecowitt/Fine-Offset or Davis WeatherLink
+    // Live), decided 2026-09-05 -- the "local" tier of the 3-tier weather
+    // picture. Unlike citadel_map_host/mesh_host, this never routes
+    // through Citadel: the console/gateway has its own reachable IP on
+    // the home LAN, so WayStation polls it directly (see
+    // weather_station.rs). Singleton row, same shape as space_weather --
+    // one station has one local console, not a history of past readings.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN local_weather_brand TEXT;
+    ALTER TABLE station_profile ADD COLUMN local_weather_host TEXT;
+    CREATE TABLE local_weather_observation (
+        id                 INTEGER PRIMARY KEY,
+        source             TEXT NOT NULL,
+        fetched_at         TEXT NOT NULL,
+        via                TEXT NOT NULL,
+        temperature_f      REAL,
+        humidity_pct       REAL,
+        wind_speed_mph     REAL,
+        wind_gust_mph      REAL,
+        wind_direction_deg REAL,
+        rain_rate_in_hr    REAL,
+        pressure_inhg      REAL
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4183,7 +4303,7 @@ mod tests {
         // save_station_profile doesn't own theme -- same as tactical_mode
         // and the signing secret -- so saving the Station form must not
         // silently reset it back to the default.
-        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None);
+        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None, None, None);
 
         assert_eq!(station_profile(&conn).theme, "red");
     }

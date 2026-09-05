@@ -25,6 +25,7 @@ mod satellite;
 mod space_weather;
 mod sync;
 mod transport;
+mod weather_station;
 
 use db::Db;
 use std::sync::Mutex;
@@ -105,6 +106,7 @@ pub fn run() {
             auto_sync::spawn_poller(app.handle().clone());
             connectivity::spawn_poller(app.handle().clone());
             nws::spawn_poller(app.handle().clone());
+            weather_station::spawn_poller(app.handle().clone());
             space_weather::spawn_poller(app.handle().clone());
             contest_calendar::spawn_poller(app.handle().clone());
             pskreporter::spawn_poller(app.handle().clone());
@@ -190,6 +192,7 @@ pub fn run() {
             db::get_dx_spots,
             db::get_aircraft_tracks,
             db::get_forecast_periods,
+            db::get_local_weather_observation,
             db::get_satellite_tles,
             db::get_qso_log,
             db::upsert_qso_log_entry,

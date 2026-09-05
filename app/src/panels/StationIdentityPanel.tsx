@@ -13,6 +13,8 @@ interface StationProfile {
   rotctld_host: string | null;
   rotator_enabled: boolean;
   citadel_map_host: string | null;
+  local_weather_brand: string | null;
+  local_weather_host: string | null;
   updated_at: string | null;
 }
 
@@ -38,6 +40,8 @@ function StationIdentityPanel() {
   const [rotctldHost, setRotctldHost] = useState("");
   const [rotatorEnabled, setRotatorEnabled] = useState(true);
   const [citadelMapHost, setCitadelMapHost] = useState("");
+  const [localWeatherBrand, setLocalWeatherBrand] = useState("");
+  const [localWeatherHost, setLocalWeatherHost] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
   useEffect(() => {
@@ -53,6 +57,8 @@ function StationIdentityPanel() {
       setRotctldHost(p.rotctld_host ?? "");
       setRotatorEnabled(p.rotator_enabled);
       setCitadelMapHost(p.citadel_map_host ?? "");
+      setLocalWeatherBrand(p.local_weather_brand ?? "");
+      setLocalWeatherHost(p.local_weather_host ?? "");
     });
   }, []);
 
@@ -74,6 +80,8 @@ function StationIdentityPanel() {
       rotctldHost: rotctldHost.trim() || null,
       rotatorEnabled,
       citadelMapHost: citadelMapHost.trim() || null,
+      localWeatherBrand: localWeatherBrand || null,
+      localWeatherHost: localWeatherHost.trim() || null,
     });
     setProfile(updated);
     setSaveState("saved");
@@ -217,6 +225,26 @@ function StationIdentityPanel() {
           Blank uses this computer's default. If unreachable, the Tactical Map falls back to
           OpenFreeMap online tiles — see the User Manual for running your own tile server without
           Citadel.
+        </span>
+      </label>
+      <label>
+        Local weather station
+        <select value={localWeatherBrand} onChange={(e) => setLocalWeatherBrand(e.currentTarget.value)}>
+          <option value="">None configured</option>
+          <option value="ecowitt">Ecowitt (or other Fine Offset-compatible gateway)</option>
+          <option value="davis_weatherlink_live">Davis WeatherLink Live</option>
+        </select>
+        {localWeatherBrand && (
+          <input
+            value={localWeatherHost}
+            onChange={(e) => setLocalWeatherHost(e.currentTarget.value)}
+            placeholder="192.168.1.50"
+          />
+        )}
+        <span className="field-hint">
+          The console/gateway's own address on your local network — WayStation polls it directly, no
+          Citadel or internet involved. Port defaults to 80 for both brands. See the Weather panel for
+          the current reading.
         </span>
       </label>
       <button type="submit" disabled={!gridValid || saveState === "saving"}>

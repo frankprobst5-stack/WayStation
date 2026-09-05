@@ -55,6 +55,14 @@ pub enum Via {
     Mesh,
     Rf,
     Manual,
+    /// A device on the operator's own local network -- reachable with
+    /// zero internet, but also not an amateur-radio RF path, so neither
+    /// existing variant would be honest. `compute_overall` below only
+    /// ever examines `via == "internet"` sources, so this can't affect
+    /// the online/degraded/RF-only determination either way -- it's
+    /// purely honest per-source metadata (see local weather station,
+    /// weather_station.rs).
+    Lan,
 }
 
 impl Via {
@@ -64,6 +72,7 @@ impl Via {
             Via::Mesh => "mesh",
             Via::Rf => "rf",
             Via::Manual => "manual",
+            Via::Lan => "lan",
         }
     }
 }
