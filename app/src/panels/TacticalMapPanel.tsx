@@ -90,6 +90,24 @@ interface ResourceRequest {
   longitude: number | null;
 }
 
+// Mirrors db::AircraftTrack.
+interface AircraftTrack {
+  id: number;
+  fetched_at: string;
+  icao24: string;
+  callsign: string | null;
+  origin_country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  altitude_m: number | null;
+  on_ground: boolean;
+  velocity_ms: number | null;
+  true_track: number | null;
+  vertical_rate_ms: number | null;
+  squawk: string | null;
+  last_contact: number;
+}
+
 const MARKER_TYPES = ["hazard", "shelter", "resource", "info"] as const;
 
 const MARKER_COLORS: Record<string, string> = {
@@ -101,6 +119,15 @@ const MARKER_COLORS: Record<string, string> = {
 
 const PERSONNEL_COLOR = "#ff6ec7";
 const RESOURCE_REQUEST_COLOR = "#7c5cff";
+const AIRCRAFT_COLOR = "#ffffff";
+
+function aircraftLabel(a: AircraftTrack): string {
+  const id = a.callsign ?? a.icao24;
+  if (a.on_ground) return `Aircraft: ${id} — on ground`;
+  const altitude = a.altitude_m !== null ? `${Math.round(a.altitude_m * 3.28084).toLocaleString()} ft` : "altitude unknown";
+  const speed = a.velocity_ms !== null ? `${Math.round(a.velocity_ms * 1.94384)} kt` : null;
+  return `Aircraft: ${id} — ${altitude}${speed ? `, ${speed}` : ""}`;
+}
 
 function markerStatusText(m: MapMarker): string {
   if (m.received_via) return `received via ${m.received_via}`;
@@ -271,13 +298,14 @@ function TacticalMapPanel() {
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    const [nodes, roster, resources, pins, personnel, resourceRequests] = await Promise.all([
+    const [nodes, roster, resources, pins, personnel, resourceRequests, aircraft] = await Promise.all([
       invoke<MeshNode[]>("get_mesh_nodes"),
       invoke<NetRosterEntry[]>("get_net_roster"),
       invoke<Resource[]>("get_resources"),
       invoke<MapMarker[]>("get_markers"),
       invoke<Person[]>("get_personnel"),
       invoke<ResourceRequest[]>("get_resource_requests"),
+      invoke<AircraftTrack[]>("get_aircraft_tracks"),
     ]);
 
     const addPin = (lat: number, lon: number, color: string, label: string) => {
@@ -305,6 +333,18 @@ function TacticalMapPanel() {
     for (const res of resources) {
       if (res.latitude !== null && res.longitude !== null) {
         addPin(res.latitude, res.longitude, "#5aa9e6", `Resource: ${res.label}`);
+      }
+    }
+    // Aircraft aren't incident objects either -- OpenSky reports what's
+    // actually in the air near this station regardless of which
+    // incident is selected, same reasoning as mesh/roster/resources
+    // above. The whole point (tracking flights toward a disaster area)
+    // is spotting something relevant before anyone's declared an
+    // incident around it yet, so hiding these behind an incident
+    // filter would work against that.
+    for (const a of aircraft) {
+      if (a.latitude !== null && a.longitude !== null) {
+        addPin(a.latitude, a.longitude, AIRCRAFT_COLOR, aircraftLabel(a));
       }
     }
 
@@ -340,13 +380,10 @@ function TacticalMapPanel() {
     if (!ready) return;
     refreshPins();
     const interval = setInterval(refreshPins, 15_000);
-    let unlisten: (() => void) | undefined;
-    listen("map-markers-changed", refreshPins).then((fn) => {
-      unlisten = fn;
-    });
+    const unlistens: Promise<() => void>[] = [listen("map-markers-changed", refreshPins), listen("aircraft-tracks-changed", refreshPins)];
     return () => {
       clearInterval(interval);
-      unlisten?.();
+      unlistens.forEach((p) => p.then((fn) => fn()));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, selectedIncident]);
@@ -460,6 +497,9 @@ function TacticalMapPanel() {
         </span>
         <span>
           <span className="tactical-map-swatch" style={{ background: RESOURCE_REQUEST_COLOR }} /> Resource requests
+        </span>
+        <span>
+          <span className="tactical-map-swatch" style={{ background: AIRCRAFT_COLOR }} /> Aircraft (ADS-B)
         </span>
         {tileSource && (
           <span className="tactical-map-source">
