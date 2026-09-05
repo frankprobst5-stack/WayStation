@@ -1,5 +1,6 @@
 mod auto_sync;
 mod backup;
+mod citadel_scanner;
 mod connectivity;
 mod contest_calendar;
 mod db;
@@ -169,6 +170,9 @@ pub fn run() {
             discovery::get_discovered_peers,
             net_sync::sync_with_peer,
             auto_sync::get_auto_sync_history,
+            citadel_scanner::get_citadel_scanner_status,
+            citadel_scanner::get_citadel_scanner_config,
+            citadel_scanner::save_citadel_scanner_config,
             db::get_resources,
             db::upsert_resource,
             db::delete_resource,

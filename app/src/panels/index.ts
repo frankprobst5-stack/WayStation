@@ -29,6 +29,7 @@ import ContestCalendarPanel from "./ContestCalendarPanel";
 import PskReporterPanel from "./PskReporterPanel";
 import PotaPanel from "./PotaPanel";
 import FlightTrackingPanel from "./FlightTrackingPanel";
+import ScannerPanel from "./ScannerPanel";
 import DxClusterPanel from "./DxClusterPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
@@ -348,6 +349,16 @@ registerPanel({
   offlineBehavior: "internet-only",
   height: "tall",
   component: FlightTrackingPanel,
+});
+
+registerPanel({
+  id: "scanner",
+  title: "Trunked Scanner (P25)",
+  category: "emcomm",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "degrades",
+  height: "tall",
+  component: ScannerPanel,
 });
 
 registerPanel({
