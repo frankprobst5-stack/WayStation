@@ -4292,6 +4292,25 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE station_profile ADD COLUMN direwolf_audio_device TEXT;
     "#,
+    // v46: Direwolf/APRS decode, slice 2, decided 2026-09-06 -- real
+    // KISS/AX.25/APRS-decoded RF station positions (aprs.rs). Keyed on
+    // callsign, replace-on-heard (latest position wins) same as
+    // space_weather/local_weather_observation's singleton-row pattern,
+    // just keyed per-station instead of a single row -- an RF station
+    // heard again with a new position should update in place, not grow
+    // an unbounded history nothing reads.
+    r#"
+    CREATE TABLE aprs_stations (
+        callsign     TEXT PRIMARY KEY,
+        lat          REAL NOT NULL,
+        lon          REAL NOT NULL,
+        symbol_table TEXT NOT NULL,
+        symbol_code  TEXT NOT NULL,
+        comment      TEXT NOT NULL,
+        path         TEXT NOT NULL,
+        heard_at     TEXT NOT NULL
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation

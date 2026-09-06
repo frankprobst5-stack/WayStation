@@ -120,6 +120,28 @@ const MARKER_COLORS: Record<string, string> = {
 const PERSONNEL_COLOR = "#ff6ec7";
 const RESOURCE_REQUEST_COLOR = "#7c5cff";
 const AIRCRAFT_COLOR = "#ffffff";
+const APRS_COLOR = "#2fd4a0";
+
+// Mirrors aprs::AprsStation -- real KISS/AX.25/APRS positions decoded
+// from Direwolf's RF traffic (direwolf.rs/aprs.rs). Source-tagged
+// separately from a possible future APRS-IS lookup, same convention as
+// mesh/aircraft/personnel/resource-request pins never silently merging.
+interface AprsStation {
+  callsign: string;
+  lat: number;
+  lon: number;
+  symbol_table: string;
+  symbol_code: string;
+  comment: string;
+  path: string;
+  heard_at: string;
+}
+
+function aprsLabel(s: AprsStation): string {
+  const via = s.path ? ` via ${s.path}` : " direct";
+  const comment = s.comment.trim() ? ` — ${s.comment.trim()}` : "";
+  return `APRS (RF): ${s.callsign}${via}${comment}`;
+}
 
 function aircraftLabel(a: AircraftTrack): string {
   const id = a.callsign ?? a.icao24;
@@ -324,7 +346,7 @@ function TacticalMapPanel() {
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    const [nodes, roster, resources, pins, personnel, resourceRequests, aircraft] = await Promise.all([
+    const [nodes, roster, resources, pins, personnel, resourceRequests, aircraft, aprsStations] = await Promise.all([
       invoke<MeshNode[]>("get_mesh_nodes"),
       invoke<NetRosterEntry[]>("get_net_roster"),
       invoke<Resource[]>("get_resources"),
@@ -332,6 +354,7 @@ function TacticalMapPanel() {
       invoke<Person[]>("get_personnel"),
       invoke<ResourceRequest[]>("get_resource_requests"),
       invoke<AircraftTrack[]>("get_aircraft_tracks"),
+      invoke<AprsStation[]>("get_aprs_stations"),
     ]);
 
     const addPin = (lat: number, lon: number, color: string, label: string) => {
@@ -372,6 +395,13 @@ function TacticalMapPanel() {
       if (a.latitude !== null && a.longitude !== null) {
         addPin(a.latitude, a.longitude, AIRCRAFT_COLOR, aircraftLabel(a));
       }
+    }
+    // Real RF-heard APRS stations -- same "standing presence, not an
+    // incident object" reasoning as mesh/aircraft above. Source-tagged
+    // with its own color/label so it's never confused with a mesh node
+    // or a future APRS-IS (internet-looked-up) station.
+    for (const s of aprsStations) {
+      addPin(s.lat, s.lon, APRS_COLOR, aprsLabel(s));
     }
 
     // Markers, personnel, and resource requests ARE incident objects --
@@ -566,6 +596,9 @@ function TacticalMapPanel() {
         </span>
         <span>
           <span className="tactical-map-swatch" style={{ background: AIRCRAFT_COLOR }} /> Aircraft (ADS-B)
+        </span>
+        <span>
+          <span className="tactical-map-swatch" style={{ background: APRS_COLOR }} /> APRS (RF)
         </span>
         {tileSource && (
           <span className="tactical-map-source">

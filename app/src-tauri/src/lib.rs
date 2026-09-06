@@ -1,4 +1,5 @@
 mod ai_sitrep;
+mod aprs;
 mod auto_sync;
 mod backup;
 mod citadel_scanner;
@@ -131,6 +132,11 @@ pub fn run() {
             // a real surprise). The health poller just reports whatever
             // state already exists.
             direwolf::spawn_health_poller(app.handle().clone());
+            // Safe to always run, unlike direwolf::start_direwolf itself:
+            // this is just a TCP client retry loop against Direwolf's
+            // KISS port, no audio device involved. It reports honestly
+            // as unreachable until Direwolf's actually started.
+            aprs::spawn_listener(app.handle().clone());
             js8call::spawn_poller(app.handle().clone());
             rig::spawn_poller(app.handle().clone());
             rotator::spawn_poller(app.handle().clone());
@@ -253,6 +259,7 @@ pub fn run() {
             direwolf::get_direwolf_status,
             direwolf::start_direwolf,
             direwolf::stop_direwolf,
+            aprs::get_aprs_stations,
             js8call::get_js8call_status,
             js8call::get_js8call_inbox,
             repeaterbook::search_repeaters,
