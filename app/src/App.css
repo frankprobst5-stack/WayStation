@@ -159,7 +159,7 @@ body {
 
 .shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 185px 1fr;
   min-height: 100vh;
 }
 
@@ -2912,16 +2912,16 @@ select {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
-  padding: 1.1rem 1.25rem 1.4rem;
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem 1rem;
   overflow-y: auto;
 }
 
 .dash-panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 0.85rem 1rem 1rem;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem 0.65rem;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2931,15 +2931,15 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.65rem;
-  padding-bottom: 0.5rem;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.35rem;
   border-bottom: 1px solid var(--border);
 }
 
 .dash-panel-title {
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
+  font-size: 0.64rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
   font-weight: 700;
@@ -2956,10 +2956,10 @@ select {
 }
 
 .dash-pill {
-  font-size: 0.6rem;
-  letter-spacing: 0.05em;
+  font-size: 0.54rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 0.2rem 0.55rem;
+  padding: 0.15rem 0.45rem;
   border-radius: 999px;
   font-weight: 700;
   white-space: nowrap;
@@ -2985,9 +2985,9 @@ select {
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   color: var(--text-primary);
-  border-radius: 6px;
-  padding: 0.32rem 0.65rem;
-  font-size: 0.68rem;
+  border-radius: 5px;
+  padding: 0.24rem 0.5rem;
+  font-size: 0.6rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -3001,9 +3001,9 @@ select {
   background: linear-gradient(155deg, var(--amber), var(--amber-dim));
   color: var(--bg-app);
   border: none;
-  border-radius: 6px;
-  padding: 0.5rem 0.9rem;
-  font-size: 0.75rem;
+  border-radius: 5px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.66rem;
   font-weight: 800;
   cursor: pointer;
   flex: 1;
@@ -3014,31 +3014,31 @@ select {
 
 .dash-footer-actions {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
 }
 
 /* Row 1 -- operational status */
 .dash-row-status {
   display: grid;
-  grid-template-columns: 1fr 260px;
-  gap: 0.9rem;
+  grid-template-columns: 1fr 220px;
+  gap: 0.6rem;
   flex-shrink: 0;
 }
 
 .dash-status-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.4rem;
 }
 
 .dash-status-chip {
-  flex: 1 1 100px;
+  flex: 1 1 90px;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 7px;
+  gap: 0.25rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
   background: var(--surface-1);
   border: 1px solid var(--border);
 }
@@ -3048,13 +3048,13 @@ select {
   justify-content: space-between;
 }
 .dash-status-chip-label {
-  font-size: 0.66rem;
-  letter-spacing: 0.04em;
+  font-size: 0.58rem;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 .dash-status-chip-value {
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 700;
 }
 .dash-status-chip-value-good { color: var(--green); }
@@ -3078,16 +3078,16 @@ select {
 .dash-health-bars {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.3rem;
   justify-content: center;
   flex: 1;
 }
 .dash-health-row {
   display: grid;
-  grid-template-columns: 36px 1fr 40px;
+  grid-template-columns: 32px 1fr 36px;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.66rem;
+  gap: 0.4rem;
+  font-size: 0.58rem;
   color: var(--text-muted);
 }
 .dash-health-track {
@@ -3105,36 +3105,38 @@ select {
 /* Row 2 -- hero: map + incident */
 .dash-row-hero {
   display: grid;
-  grid-template-columns: 1fr 300px;
-  gap: 0.9rem;
+  grid-template-columns: 1fr 240px;
+  gap: 0.6rem;
   flex-shrink: 0;
 }
 
 .dash-map-panel {
-  padding: 0.85rem 1rem 0.85rem;
+  padding: 0.55rem 0.65rem 0.55rem;
 }
 
 .dash-map-embed {
   margin-top: -0.2rem;
 }
 /* TacticalMapPanel brings its own real layout/toolbar/legend -- this just
-   nests it, it doesn't reimplement or shrink it. */
+   nests it, it doesn't reimplement or shrink it. Deliberately the one
+   panel this density pass leaves untouched (Frank: "boxes smaller except
+   for the map") -- the map is the centerpiece, not another box to shrink. */
 
 .dash-incident-panel {
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .dash-field-grid {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.22rem 0.6rem;
-  font-size: 0.76rem;
+  gap: 0.16rem 0.5rem;
+  font-size: 0.66rem;
   margin: 0;
 }
 .dash-field-grid dt {
   color: var(--text-muted);
-  font-size: 0.68rem;
-  letter-spacing: 0.03em;
+  font-size: 0.58rem;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   align-self: center;
 }
@@ -3146,28 +3148,28 @@ select {
 .dash-divider {
   height: 1px;
   background: var(--border);
-  margin: 0.3rem 0;
+  margin: 0.22rem 0;
 }
 
 .dash-traffic-title {
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.1rem;
 }
 
 .dash-traffic-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.14rem 0;
-  font-size: 0.78rem;
+  padding: 0.08rem 0;
+  font-size: 0.66rem;
 }
 .dash-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 .dash-traffic-count {
   font-weight: 700;
@@ -3175,24 +3177,24 @@ select {
 
 .dash-incident-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
   margin-top: auto;
-  padding-top: 0.5rem;
+  padding-top: 0.35rem;
 }
 
 /* Row 3 -- radio / rotator / comms / activity */
 .dash-row-quad {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 0.9rem;
+  gap: 0.6rem;
   flex-shrink: 0;
 }
 
 .dash-kv-row {
   display: flex;
   justify-content: space-between;
-  font-size: 0.75rem;
-  padding: 0.18rem 0;
+  font-size: 0.64rem;
+  padding: 0.12rem 0;
   color: var(--text-muted);
 }
 .dash-kv-row strong {
@@ -3201,17 +3203,17 @@ select {
 }
 
 .dash-dial {
-  width: 78px;
-  height: 78px;
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
-  margin: 0.3rem auto 0.5rem;
+  margin: 0.2rem auto 0.35rem;
   position: relative;
   background: var(--surface-1);
 }
 .dash-dial span {
   position: absolute;
-  font-size: 0.55rem;
+  font-size: 0.48rem;
   color: var(--text-muted);
 }
 .dash-dial-n { top: 3px; left: 50%; transform: translateX(-50%); }
@@ -3233,32 +3235,32 @@ select {
 .dash-activity-list {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.2rem;
   overflow-y: auto;
   overflow-x: hidden;
 }
 .dash-comms-row {
   display: grid;
-  grid-template-columns: 16px 1fr auto auto;
+  grid-template-columns: 14px 1fr auto auto;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.32rem 0.1rem;
+  gap: 0.35rem;
+  padding: 0.22rem 0.1rem;
   border-bottom: 1px solid var(--border);
-  font-size: 0.75rem;
+  font-size: 0.64rem;
 }
 .dash-comms-row:last-child { border-bottom: none; }
 .dash-via-label {
   color: var(--text-muted);
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
+  font-size: 0.52rem;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .dash-activity-row {
   display: flex;
-  gap: 0.55rem;
-  font-size: 0.73rem;
-  padding: 0.28rem 0;
+  gap: 0.4rem;
+  font-size: 0.6rem;
+  padding: 0.18rem 0;
   border-bottom: 1px solid var(--border);
 }
 .dash-activity-row:last-child { border-bottom: none; }
@@ -3274,77 +3276,77 @@ select {
 .dash-row-tri {
   display: grid;
   grid-template-columns: 1.1fr 1fr 1.1fr;
-  gap: 0.9rem;
+  gap: 0.6rem;
   flex-shrink: 0;
 }
 
 .dash-swx-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-  margin-top: 0.2rem;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
 }
 .dash-swx-tile {
   text-align: center;
-  padding: 0.4rem 0.2rem;
-  border-radius: 6px;
+  padding: 0.3rem 0.15rem;
+  border-radius: 5px;
   background: var(--surface-1);
   border: 1px solid var(--border);
 }
 .dash-swx-v {
-  font-size: 1.05rem;
+  font-size: 0.9rem;
   font-weight: 700;
 }
 .dash-swx-l {
-  font-size: 0.6rem;
+  font-size: 0.52rem;
   color: var(--text-muted);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .dash-band-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.72rem;
-  margin-top: 0.5rem;
+  font-size: 0.62rem;
+  margin-top: 0.35rem;
 }
 .dash-band-table th {
   text-align: left;
   color: var(--text-muted);
   font-weight: 600;
-  font-size: 0.62rem;
-  letter-spacing: 0.05em;
+  font-size: 0.54rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding-bottom: 0.3rem;
+  padding-bottom: 0.2rem;
 }
 .dash-band-table td {
-  padding: 0.24rem 0;
+  padding: 0.16rem 0;
   border-top: 1px solid var(--border);
 }
 
 .dash-weather-hero {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
-  padding: 0.3rem 0 0.6rem;
+  gap: 0.6rem;
+  padding: 0.2rem 0 0.4rem;
 }
 .dash-weather-temp {
-  font-size: 2.1rem;
+  font-size: 1.6rem;
   font-weight: 700;
   line-height: 1;
 }
 .dash-weather-sub {
   color: var(--text-muted);
-  font-size: 0.78rem;
+  font-size: 0.64rem;
 }
 
 .dash-nets-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.73rem;
+  font-size: 0.62rem;
 }
 .dash-nets-table td {
-  padding: 0.3rem 0;
+  padding: 0.2rem 0;
   border-top: 1px solid var(--border);
 }
 .dash-nets-table td:last-child {
@@ -3352,7 +3354,15 @@ select {
   color: var(--amber);
 }
 
-@media (max-width: 1100px) {
+/* This app's real window is a desktop-native Tauri app, not a responsive
+   web page -- 1024px-class windows (a common default/VM display width,
+   confirmed by real screenshots of the actual running app) are the normal
+   case here, not an edge case to collapse away from. The breakpoints
+   below only kick in on a genuinely narrow window, so the compact
+   multi-column layout this whole redesign was for doesn't quietly revert
+   to the "long scrolling page" it replaced the moment the window isn't
+   ultra-wide. */
+@media (max-width: 860px) {
   .dash-row-status,
   .dash-row-hero {
     grid-template-columns: 1fr;
@@ -3361,6 +3371,12 @@ select {
     grid-template-columns: repeat(2, 1fr);
   }
   .dash-row-tri {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 639px) {
+  .dash-row-quad {
     grid-template-columns: 1fr;
   }
 }

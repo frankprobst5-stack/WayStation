@@ -123,6 +123,15 @@ pub fn run() {
             js8call::spawn_poller(app.handle().clone());
             rig::spawn_poller(app.handle().clone());
             rotator::spawn_poller(app.handle().clone());
+            // Belt-and-suspenders with tauri.conf.json's own "maximized"
+            // hint: some Linux window managers apply an initial-maximize
+            // request inconsistently (timing-dependent on when the WM
+            // actually sees the window), so this asks again explicitly
+            // once the window definitely exists, rather than trusting the
+            // config hint alone to have taken effect by launch time.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.maximize();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
