@@ -86,6 +86,11 @@ pub struct StationProfile {
     /// directly, not behind the cockpit nginx proxy) -- see
     /// kiwix_search.rs. None means the local default (127.0.0.1:8095).
     pub citadel_kiwix_host: Option<String>,
+    /// ALSA device name Direwolf should capture audio from (e.g.
+    /// `plughw:1,0`) -- see direwolf.rs. None means not configured, in
+    /// which case Direwolf falls back to its own default device rather
+    /// than WayStation guessing one.
+    pub direwolf_audio_device: Option<String>,
     /// This station's own WSP/1 object-signing secret (HMAC-SHA256 key,
     /// see sync.rs). Not a Station-form field, same reasoning as
     /// `manual_offline`/`tactical_mode` -- generated once via
@@ -129,6 +134,7 @@ impl Default for StationProfile {
             local_weather_brand: None,
             local_weather_host: None,
             citadel_kiwix_host: None,
+            direwolf_audio_device: None,
             signing_secret: None,
             theme: "dark".to_string(),
             updated_at: None,
@@ -138,7 +144,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -159,7 +165,8 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 local_weather_brand: row.get(14)?,
                 local_weather_host: row.get(15)?,
                 citadel_kiwix_host: row.get(16)?,
-                updated_at: row.get(17)?,
+                direwolf_audio_device: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         },
     )
@@ -248,6 +255,7 @@ fn save_station_profile_conn(
     local_weather_brand: Option<String>,
     local_weather_host: Option<String>,
     citadel_kiwix_host: Option<String>,
+    direwolf_audio_device: Option<String>,
 ) -> StationProfile {
     let now = chrono::Utc::now().to_rfc3339();
     // The Station form doesn't own the offline flag, tactical_mode, the
@@ -260,8 +268,8 @@ fn save_station_profile_conn(
     let signing_secret = existing.signing_secret;
     let theme = existing.theme;
     conn.execute(
-        "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, local_weather_brand, local_weather_host, citadel_kiwix_host, updated_at)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(id) DO UPDATE SET
             callsign = excluded.callsign,
             grid_square = excluded.grid_square,
@@ -276,8 +284,9 @@ fn save_station_profile_conn(
             local_weather_brand = excluded.local_weather_brand,
             local_weather_host = excluded.local_weather_host,
             citadel_kiwix_host = excluded.citadel_kiwix_host,
+            direwolf_audio_device = excluded.direwolf_audio_device,
             updated_at = excluded.updated_at",
-        params![callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled as i64, rotctld_host, rotator_enabled as i64, citadel_map_host, local_weather_brand, local_weather_host, citadel_kiwix_host, now],
+        params![callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled as i64, rotctld_host, rotator_enabled as i64, citadel_map_host, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, now],
     )
     .expect("failed to save station_profile");
 
@@ -297,6 +306,7 @@ fn save_station_profile_conn(
         local_weather_brand,
         local_weather_host,
         citadel_kiwix_host,
+        direwolf_audio_device,
         signing_secret,
         theme,
         updated_at: Some(now),
@@ -320,6 +330,7 @@ pub fn save_station_profile(
     local_weather_brand: Option<String>,
     local_weather_host: Option<String>,
     citadel_kiwix_host: Option<String>,
+    direwolf_audio_device: Option<String>,
 ) -> StationProfile {
     let conn = db.0.lock().expect("db mutex poisoned");
     save_station_profile_conn(
@@ -337,6 +348,7 @@ pub fn save_station_profile(
         local_weather_brand,
         local_weather_host,
         citadel_kiwix_host,
+        direwolf_audio_device,
     )
 }
 
@@ -4266,6 +4278,20 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE station_profile ADD COLUMN citadel_kiwix_host TEXT;
     "#,
+    // v45: Direwolf/APRS orchestration, decided 2026-09-06 -- the
+    // "APRS/packet radio via Direwolf" Planned backlog item, slice 1
+    // (start/stop + status only; real AX.25/APRS decode and TacticalMap
+    // markers are a separate, larger slice not started yet). Unlike
+    // Pat/JS8Call, this doesn't need a `_host` field: WayStation always
+    // spawns its own local Direwolf process (same as Pat) rather than
+    // connecting to one running elsewhere, so there's no remote address
+    // to configure -- only the local ALSA audio device Direwolf should
+    // capture from. None means not configured, same honest-default
+    // convention as every other optional field here; direwolf.rs falls
+    // back to Direwolf's own default device when this is unset.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN direwolf_audio_device TEXT;
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4469,7 +4495,7 @@ mod tests {
         // save_station_profile doesn't own theme -- same as tactical_mode
         // and the signing secret -- so saving the Station form must not
         // silently reset it back to the default.
-        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None, None, None, None);
+        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None, None, None, None, None);
 
         assert_eq!(station_profile(&conn).theme, "red");
     }

@@ -6,6 +6,7 @@ mod connectivity;
 mod contest_calendar;
 mod db;
 mod discovery;
+mod direwolf;
 mod dispatch;
 mod dxcluster;
 mod flight_tracking;
@@ -100,6 +101,7 @@ pub fn run() {
             let conn = db::open();
             app.manage(Db(Mutex::new(conn)));
             app.manage(pat::PatProcess(Mutex::new(None)));
+            app.manage(direwolf::DirewolfProcess(Mutex::new(None)));
             app.manage(mesh::MeshState::new());
             app.manage(discovery::DiscoveryState::new());
             app.manage(auto_sync::AutoSyncState::new());
@@ -122,6 +124,13 @@ pub fn run() {
             mesh::spawn_poller(app.handle().clone());
             pat::spawn_or_restart(app.handle());
             pat::spawn_health_poller(app.handle().clone());
+            // Deliberately no direwolf::start_direwolf(...) call here --
+            // unlike Pat, this never auto-starts (see direwolf.rs's own
+            // doc comment: a real live microphone opening on every app
+            // launch, before an operator has confirmed audio routing, is
+            // a real surprise). The health poller just reports whatever
+            // state already exists.
+            direwolf::spawn_health_poller(app.handle().clone());
             js8call::spawn_poller(app.handle().clone());
             rig::spawn_poller(app.handle().clone());
             rotator::spawn_poller(app.handle().clone());
@@ -241,6 +250,9 @@ pub fn run() {
             pat::get_winlink_status,
             pat::get_winlink_inbox,
             pat::restart_winlink_service,
+            direwolf::get_direwolf_status,
+            direwolf::start_direwolf,
+            direwolf::stop_direwolf,
             js8call::get_js8call_status,
             js8call::get_js8call_inbox,
             repeaterbook::search_repeaters,
@@ -254,6 +266,12 @@ pub fn run() {
                 let state = app_handle.state::<pat::PatProcess>();
                 let mut guard = state.0.lock().expect("pat process mutex poisoned");
                 if let Some(mut child) = guard.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                let direwolf_state = app_handle.state::<direwolf::DirewolfProcess>();
+                let mut direwolf_guard = direwolf_state.0.lock().expect("direwolf process mutex poisoned");
+                if let Some(mut child) = direwolf_guard.take() {
                     let _ = child.kill();
                     let _ = child.wait();
                 }

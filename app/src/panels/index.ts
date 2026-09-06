@@ -15,6 +15,7 @@ import ResourcesPanel from "./ResourcesPanel";
 import ReadinessPanel from "./ReadinessPanel";
 import WinlinkPanel from "./WinlinkPanel";
 import Js8CallPanel from "./Js8CallPanel";
+import PacketPanel from "./PacketPanel";
 import SpaceWeatherPanel from "./SpaceWeatherPanel";
 import SpectrumReferencePanel from "./SpectrumReferencePanel";
 import ChannelDirectoryPanel from "./ChannelDirectoryPanel";
@@ -198,6 +199,15 @@ registerPanel({
   refreshCadenceSeconds: 15,
   offlineBehavior: "degrades",
   component: Js8CallPanel,
+});
+
+registerPanel({
+  id: "packet",
+  title: "Packet (APRS/Direwolf)",
+  category: "messaging",
+  refreshCadenceSeconds: 15,
+  offlineBehavior: "degrades",
+  component: PacketPanel,
 });
 
 registerPanel({

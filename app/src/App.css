@@ -2653,6 +2653,45 @@ select {
   white-space: nowrap;
 }
 
+/* Packet (Direwolf) panel -- same visual technique as Winlink's
+   .winlink-* set just above, scoped under .panel-packet rather than
+   reusing those names directly (Direwolf is its own integration, not a
+   Winlink variant). .field-hint is deliberately scoped here too, same
+   per-panel convention .panel-station-identity already established --
+   there's no unscoped base rule for it. */
+.panel-packet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.panel-packet .packet-lede {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.panel-packet .field-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.packet-cmd {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 .manual-cmd {
   display: block;
   margin-top: 0.35rem;

@@ -63,6 +63,18 @@ pub enum Via {
     /// purely honest per-source metadata (see local weather station,
     /// weather_station.rs).
     Lan,
+    /// Real RF-decoded APRS/packet traffic via Direwolf (direwolf.rs) --
+    /// deliberately not `Rf`, even though it genuinely is RF. `Rf`
+    /// already means "point-to-point RF messaging session" (JS8Call,
+    /// Winlink over radio) here; a packet/APRS network is structurally
+    /// different -- many stations heard passively, not a session with
+    /// one correspondent -- and collapsing the two into one tag would
+    /// hide that distinction from anything that reads `via` later (e.g.
+    /// a future map layer wanting to show "packet stations heard" as
+    /// its own thing). `compute_overall` below still only ever examines
+    /// `via == "internet"`, so this can't affect online/degraded/RF-only
+    /// determination either way -- same reasoning as `Lan`.
+    Aprs,
 }
 
 impl Via {
@@ -73,6 +85,7 @@ impl Via {
             Via::Rf => "rf",
             Via::Manual => "manual",
             Via::Lan => "lan",
+            Via::Aprs => "aprs",
         }
     }
 }

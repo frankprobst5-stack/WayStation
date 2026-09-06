@@ -16,6 +16,7 @@ interface StationProfile {
   local_weather_brand: string | null;
   local_weather_host: string | null;
   citadel_kiwix_host: string | null;
+  direwolf_audio_device: string | null;
   updated_at: string | null;
 }
 
@@ -44,6 +45,7 @@ function StationIdentityPanel() {
   const [localWeatherBrand, setLocalWeatherBrand] = useState("");
   const [localWeatherHost, setLocalWeatherHost] = useState("");
   const [citadelKiwixHost, setCitadelKiwixHost] = useState("");
+  const [direwolfAudioDevice, setDirewolfAudioDevice] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
   useEffect(() => {
@@ -62,6 +64,7 @@ function StationIdentityPanel() {
       setLocalWeatherBrand(p.local_weather_brand ?? "");
       setLocalWeatherHost(p.local_weather_host ?? "");
       setCitadelKiwixHost(p.citadel_kiwix_host ?? "");
+      setDirewolfAudioDevice(p.direwolf_audio_device ?? "");
     });
   }, []);
 
@@ -86,6 +89,7 @@ function StationIdentityPanel() {
       localWeatherBrand: localWeatherBrand || null,
       localWeatherHost: localWeatherHost.trim() || null,
       citadelKiwixHost: citadelKiwixHost.trim() || null,
+      direwolfAudioDevice: direwolfAudioDevice.trim() || null,
     });
     setProfile(updated);
     setSaveState("saved");
@@ -263,6 +267,19 @@ function StationIdentityPanel() {
           your offline library (Ready.gov, field manuals, etc.) by keyword. Blank uses this
           computer's default. Not AI or semantic search -- real keyword matches from your own
           local library, with excerpts.
+        </span>
+      </label>
+      <label>
+        Direwolf audio device (APRS/packet)
+        <input
+          value={direwolfAudioDevice}
+          onChange={(e) => setDirewolfAudioDevice(e.currentTarget.value)}
+          placeholder="plughw:1,0"
+        />
+        <span className="field-hint">
+          The ALSA capture device Direwolf should use — run <code>arecord -l</code> in a terminal to
+          list real device names on this machine. Blank uses Direwolf's own default device. See the
+          Packet panel to start/stop Direwolf itself.
         </span>
       </label>
       <button type="submit" disabled={!gridValid || saveState === "saving"}>
