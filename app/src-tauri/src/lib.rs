@@ -1,3 +1,4 @@
+mod ai_sitrep;
 mod auto_sync;
 mod backup;
 mod citadel_scanner;
@@ -141,6 +142,7 @@ pub fn run() {
             db::set_theme,
             db::get_traffic_counts,
             db::get_recent_activity,
+            ai_sitrep::generate_sitrep_narrative,
             system_health::get_system_health,
             db::get_or_create_signing_secret,
             db::add_trusted_peer,

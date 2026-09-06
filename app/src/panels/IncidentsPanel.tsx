@@ -63,11 +63,14 @@ function IncidentTimeline({ incidentUuid }: { incidentUuid: string }) {
   );
 }
 
+type NarrativeState = { status: "loading"; text?: undefined; error?: undefined } | { status: "done"; text: string; error?: undefined } | { status: "error"; error: string; text?: undefined };
+
 function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
   const [sitreps, setSitreps] = useState<Sitrep[]>([]);
   const [generating, setGenerating] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [narratives, setNarratives] = useState<Record<number, NarrativeState>>({});
 
   async function refresh() {
     setSitreps(await invoke<Sitrep[]>("get_sitreps", { incidentId: incidentUuid }));
@@ -93,6 +96,16 @@ function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
     setTimeout(() => setCopiedId(null), 1500);
   }
 
+  async function generateNarrative(sitrep: Sitrep) {
+    setNarratives((current) => ({ ...current, [sitrep.id]: { status: "loading" } }));
+    try {
+      const text = await invoke<string>("generate_sitrep_narrative", { sitrepBody: sitrep.body });
+      setNarratives((current) => ({ ...current, [sitrep.id]: { status: "done", text } }));
+    } catch (err) {
+      setNarratives((current) => ({ ...current, [sitrep.id]: { status: "error", error: String(err) } }));
+    }
+  }
+
   return (
     <div className="incident-sitreps">
       <div className="incident-sitreps-head">
@@ -115,8 +128,27 @@ function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
             <button type="button" onClick={() => copyBody(sitrep)}>
               {copiedId === sitrep.id ? "Copied" : "Copy"}
             </button>
+            <button
+              type="button"
+              onClick={() => generateNarrative(sitrep)}
+              disabled={narratives[sitrep.id]?.status === "loading"}
+            >
+              {narratives[sitrep.id]?.status === "loading" ? "Summarizing…" : "AI Narrative Summary"}
+            </button>
           </div>
           {openId === sitrep.id && <pre className="incident-sitrep-body">{sitrep.body}</pre>}
+          {narratives[sitrep.id]?.status === "loading" && (
+            <div className="field-hint">Generating with Citadel's local AI — can take up to a minute on first use while the model loads.</div>
+          )}
+          {narratives[sitrep.id]?.status === "error" && (
+            <div className="sync-result sync-result-error">Couldn't generate a summary: {narratives[sitrep.id].error}</div>
+          )}
+          {narratives[sitrep.id]?.status === "done" && (
+            <div className="incident-sitrep-narrative">
+              <div className="field-hint">AI-generated summary — not verified, always check against the SITREP text above.</div>
+              <p>{narratives[sitrep.id].text}</p>
+            </div>
+          )}
         </div>
       ))}
     </div>
