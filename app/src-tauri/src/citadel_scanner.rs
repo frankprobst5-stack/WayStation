@@ -58,6 +58,60 @@ pub struct ScannerTranscript {
     pub transcript_text: Option<String>,
 }
 
+/// Mirrors `scanner_bridge.py`'s `parse_systems_message()` output
+/// (2026-09-06) -- real trunk-recorder system identity, not derived or
+/// guessed. Every field is a string because trunk-recorder's own real
+/// documented JSON sends them as strings (see that file's module
+/// docstring for the verified source).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerSystem {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub system_type: Option<String>,
+    pub sysid: Option<String>,
+    pub wacn: Option<String>,
+    pub nac: Option<String>,
+}
+
+/// Mirrors `scanner_bridge.py`'s `parse_calls_active_message()` output --
+/// a live call trunk-recorder is currently tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerActiveCall {
+    pub id: Option<String>,
+    pub freq: Option<String>,
+    pub system: Option<String>,
+    pub talkgroup: Option<String>,
+    pub talkgroup_tag: Option<String>,
+    pub elapsed: Option<String>,
+    pub length: Option<String>,
+    pub state: Option<String>,
+    pub encrypted: Option<String>,
+    pub emergency: Option<String>,
+    pub analog: Option<String>,
+}
+
+/// Mirrors `scanner_bridge.py`'s `parse_recorders_message()` output --
+/// per-recorder decoder health.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerRecorder {
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub recorder_type: Option<String>,
+    pub src_num: Option<String>,
+    pub rec_num: Option<String>,
+    pub count: Option<String>,
+    pub duration: Option<String>,
+    pub state: Option<String>,
+}
+
+/// Mirrors `scanner_bridge.py`'s `parse_rates_message()` output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerDecodeRate {
+    pub id: Option<String>,
+    pub decode_rate: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScannerStatus {
     pub status: String,
@@ -66,6 +120,18 @@ pub struct ScannerStatus {
     pub detail: Option<String>,
     #[serde(default)]
     pub transcripts: Vec<ScannerTranscript>,
+    /// Everything below is new 2026-09-06, alongside `scanner_bridge.py`
+    /// (the real trunk-recorder statusServer bridge) -- `#[serde(default)]`
+    /// so this still deserializes cleanly against a scanner_state.json
+    /// written before that date, or Citadel's older no_data default.
+    #[serde(default)]
+    pub systems: Vec<ScannerSystem>,
+    #[serde(default)]
+    pub active_calls: Vec<ScannerActiveCall>,
+    #[serde(default)]
+    pub recorders: Vec<ScannerRecorder>,
+    #[serde(default)]
+    pub decode_rates: Vec<ScannerDecodeRate>,
 }
 
 /// Live scanner status/transcripts for display -- mirrors Citadel's
@@ -176,6 +242,50 @@ mod tests {
     #[test]
     fn citadel_base_uses_a_configured_host_and_trims_whitespace() {
         assert_eq!(citadel_base(&Some(" 192.168.1.50:8085 ".to_string())), "http://192.168.1.50:8085");
+    }
+
+    /// Real JSON captured live 2026-09-06 from the actual running
+    /// `citadel-scanner-bridge` container (docker exec'd a real websocket
+    /// client into it, sent real trunk-recorder-shaped messages, read
+    /// back the file it wrote) -- not hand-invented, the genuine output
+    /// of scanner_bridge.py's ScannerState.to_json().
+    const REAL_CAPTURED_SCANNER_STATE: &str = r#"{
+      "status": "no_data",
+      "updated_at": null,
+      "detail": "trunk-recorder disconnected from the status bridge.",
+      "systems": [
+        {"id": "0", "name": "AEP", "type": "p25", "sysid": "1", "wacn": "2", "nac": "3"}
+      ],
+      "active_calls": [
+        {"id": "1", "freq": "854612500", "system": "aep", "talkgroup": "3421",
+         "talkgroup_tag": "County Dispatch", "elapsed": "5", "length": null,
+         "state": null, "encrypted": null, "emergency": null, "analog": null}
+      ],
+      "recorders": [],
+      "decode_rates": [],
+      "transcripts": []
+    }"#;
+
+    #[test]
+    fn scanner_status_deserializes_the_real_captured_bridge_output() {
+        let status: ScannerStatus = serde_json::from_str(REAL_CAPTURED_SCANNER_STATE).unwrap();
+        assert_eq!(status.status, "no_data");
+        assert_eq!(status.systems[0].name.as_deref(), Some("AEP"));
+        assert_eq!(status.active_calls[0].talkgroup.as_deref(), Some("3421"));
+        assert_eq!(status.active_calls[0].talkgroup_tag.as_deref(), Some("County Dispatch"));
+        assert!(status.recorders.is_empty());
+    }
+
+    #[test]
+    fn scanner_status_deserializes_citadels_older_no_data_default_cleanly() {
+        // The pre-2026-09-06 shape (no systems/active_calls/recorders/
+        // decode_rates at all) must still parse -- an operator whose
+        // Citadel hasn't been restarted since this update shouldn't see
+        // WayStation fail to even read the honest "no_data" response.
+        let old_shape = r#"{"status":"no_data","updated_at":null,"detail":"No scanner decode daemon configured yet.","transcripts":[]}"#;
+        let status: ScannerStatus = serde_json::from_str(old_shape).unwrap();
+        assert_eq!(status.status, "no_data");
+        assert!(status.systems.is_empty());
     }
 
     /// `#[ignore]`d because it needs a real running Citadel instance on

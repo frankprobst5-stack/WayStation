@@ -10,11 +10,57 @@ interface ScannerTranscript {
   transcript_text: string | null;
 }
 
+// Mirrors citadel_scanner::ScannerSystem/ScannerActiveCall/ScannerRecorder/
+// ScannerDecodeRate -- real trunk-recorder statusServer data via
+// scanner_bridge.py, added 2026-09-06. Every field is a string because
+// that's genuinely how trunk-recorder's own documented JSON sends them.
+interface ScannerSystem {
+  id: string | null;
+  name: string | null;
+  system_type: string | null;
+  sysid: string | null;
+  wacn: string | null;
+  nac: string | null;
+}
+
+interface ScannerActiveCall {
+  id: string | null;
+  freq: string | null;
+  system: string | null;
+  talkgroup: string | null;
+  talkgroup_tag: string | null;
+  elapsed: string | null;
+  length: string | null;
+  state: string | null;
+  encrypted: string | null;
+  emergency: string | null;
+  analog: string | null;
+}
+
+interface ScannerRecorder {
+  id: string | null;
+  recorder_type: string | null;
+  src_num: string | null;
+  rec_num: string | null;
+  count: string | null;
+  duration: string | null;
+  state: string | null;
+}
+
+interface ScannerDecodeRate {
+  id: string | null;
+  decode_rate: string | null;
+}
+
 interface ScannerStatus {
   status: string;
   updated_at: string | null;
   detail: string | null;
   transcripts: ScannerTranscript[];
+  systems: ScannerSystem[];
+  active_calls: ScannerActiveCall[];
+  recorders: ScannerRecorder[];
+  decode_rates: ScannerDecodeRate[];
 }
 
 // Mirrors citadel_scanner::ScannerConfigResponse.
@@ -164,6 +210,109 @@ function ScannerPanel() {
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {statusState.status.systems.length > 0 && (
+              <>
+                <div className="sync-section-head">
+                  <h4>Systems</h4>
+                </div>
+                <table className="band-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Sys ID</th>
+                      <th>WACN</th>
+                      <th>NAC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statusState.status.systems.map((s, i) => (
+                      <tr key={i}>
+                        <td>{s.name ?? "—"}</td>
+                        <td>{s.system_type ?? "—"}</td>
+                        <td className="mono">{s.sysid ?? "—"}</td>
+                        <td className="mono">{s.wacn ?? "—"}</td>
+                        <td className="mono">{s.nac ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            <div className="sync-section-head">
+              <h4>Active Talkgroups (Live)</h4>
+            </div>
+            {statusState.status.active_calls.length === 0 ? (
+              <div className="field-hint">No active calls right now.</div>
+            ) : (
+              <table className="band-table">
+                <thead>
+                  <tr>
+                    <th>System</th>
+                    <th>TGID</th>
+                    <th>Tag</th>
+                    <th>Freq (Hz)</th>
+                    <th>Elapsed (s)</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {statusState.status.active_calls.map((c, i) => (
+                    <tr key={i}>
+                      <td>{c.system ?? "—"}</td>
+                      <td className="mono">{c.talkgroup ?? "—"}</td>
+                      <td>{c.talkgroup_tag ?? "—"}</td>
+                      <td className="mono">{c.freq ?? "—"}</td>
+                      <td className="mono">{c.elapsed ?? "—"}</td>
+                      <td>
+                        {c.emergency === "1" && <span style={{ color: "#e64d4d", fontWeight: "bold" }}>EMERGENCY </span>}
+                        {c.encrypted === "1" ? "Encrypted" : c.state ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {statusState.status.recorders.length > 0 && (
+              <>
+                <div className="sync-section-head">
+                  <h4>Recorder Health</h4>
+                </div>
+                <table className="band-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Type</th>
+                      <th>State</th>
+                      <th>Recordings</th>
+                      <th>Last Duration (s)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statusState.status.recorders.map((r, i) => (
+                      <tr key={i}>
+                        <td className="mono">{r.id ?? "—"}</td>
+                        <td>{r.recorder_type ?? "—"}</td>
+                        <td>{r.state ?? "—"}</td>
+                        <td className="mono">{r.count ?? "—"}</td>
+                        <td className="mono">{r.duration ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            {statusState.status.systems.length === 0 && statusState.status.status === "no_data" && (
+              <div className="field-hint">
+                Nothing has connected yet. Once trunk-recorder is running with a real config (see Setup below) and
+                its <code>statusServer</code> is reachable, real systems, live talkgroup activity, and recorder
+                health will show up here automatically.
               </div>
             )}
           </>
