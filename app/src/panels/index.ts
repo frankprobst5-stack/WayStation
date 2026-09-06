@@ -371,7 +371,8 @@ registerPanel({
   category: "scanner",
   refreshCadenceSeconds: null,
   offlineBehavior: "degrades",
-  height: "tall",
+  height: "natural",
+  width: "full",
   component: ScannerPanel,
 });
 

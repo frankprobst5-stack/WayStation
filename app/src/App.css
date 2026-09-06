@@ -3380,3 +3380,337 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   Scanner page — approved "System Status" mockup, applied
+   2026-09-06. Same rule as `.dash-*` above: separate prefix so
+   nothing here leaks onto other tabs, every color still comes
+   from the shared theme tokens. Unlike the Dashboard, this panel
+   is honest about a real gap — the mockup had Sites/Recordings
+   24h/Disk Space/Uptime tiles, a Quick Controls block, a Recent
+   Recordings list and a Storage Usage donut, none of which have a
+   real API behind them yet. Those are left out entirely rather
+   than built with placeholder numbers or dead buttons; only the
+   sections backed by real citadel_scanner.rs / scanner_bridge.py
+   data got the mockup treatment. ============================ */
+
+.scan-root {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.scan-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.scan-header-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  background: linear-gradient(155deg, var(--amber), var(--amber-dim));
+  color: var(--bg-app);
+}
+
+.scan-header-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.scan-header-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: 0 0 8px rgba(255, 176, 0, 0.2);
+}
+
+.scan-header-tagline {
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.scan-lede {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding: 0.5rem 0.65rem;
+  border-left: 2px solid var(--border-strong);
+  background: var(--surface-1);
+  border-radius: 0 6px 6px 0;
+}
+
+.scan-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.scan-status-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.scan-status-name {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.scan-status-detail {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+.scan-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.scan-pill .scan-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.scan-pill-good { color: var(--green); }
+.scan-pill-bad { color: var(--red); }
+.scan-pill-warn { color: var(--gold); }
+.scan-pill-off { color: var(--status-off); }
+
+.scan-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.5rem;
+}
+
+.scan-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 7px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+
+.scan-tile-label {
+  font-size: 0.56rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.scan-tile-value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-tile-value-good { color: var(--green); }
+.scan-tile-value-bad { color: var(--red); }
+
+.scan-section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem 0.7rem;
+}
+
+.scan-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.scan-section-head h3,
+.scan-section-head h4 {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.scan-section-head h4 {
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
+
+.scan-subsection {
+  margin-top: 0.65rem;
+}
+
+.scan-empty {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  padding: 0.35rem 0;
+}
+
+.scan-hint {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.scan-result {
+  font-size: 0.72rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+
+.scan-result-ok {
+  color: var(--green);
+  border-color: var(--border-strong);
+}
+
+.scan-result-error {
+  color: var(--red);
+  border-color: var(--border-strong);
+}
+
+.scan-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+}
+
+.scan-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 0.56rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0.4rem 0.3rem 0;
+}
+
+.scan-table td {
+  padding: 0.3rem 0.4rem 0.3rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.scan-table tr:hover td {
+  background: var(--surface-1);
+}
+
+.scan-table-wrap {
+  overflow-x: auto;
+}
+
+.mono {
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-emergency {
+  color: var(--red);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.scan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.scan-form label {
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.scan-form-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.scan-form-row > * {
+  flex: 1;
+  min-width: 110px;
+}
+
+.scan-form input,
+.scan-form textarea {
+  padding: 0.4em 0.6em;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.scan-form textarea {
+  font-family: monospace;
+  resize: vertical;
+}
+
+.scan-submit-btn {
+  align-self: flex-start;
+  background: linear-gradient(155deg, var(--amber), var(--amber-dim));
+  color: var(--bg-app);
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 1rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.scan-submit-btn:hover {
+  filter: brightness(1.08);
+}
+
+.scan-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

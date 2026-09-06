@@ -79,7 +79,15 @@ type StatusState = { kind: "loading" } | { kind: "ready"; status: ScannerStatus 
 
 type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "done" } | { kind: "error"; message: string };
 
-const STATUS_COLORS: Record<string, string> = { no_data: "#888", listening: "#39d97a", ok: "#39d97a", error: "#e64d4d" };
+// Which `.scan-pill-*`/`.scan-tile-value-*` tier a raw status string reads
+// as. "listening"/"ok" are the only real "good" values trunk-recorder or
+// the bridge itself ever sends -- everything unrecognized reads as off
+// rather than guessed-good, same honesty rule as the rest of the app.
+function statusTier(status: string): "good" | "bad" | "off" {
+  if (status === "listening" || status === "ok") return "good";
+  if (status === "error") return "bad";
+  return "off";
+}
 
 function ScannerPanel() {
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
@@ -174,51 +182,98 @@ function ScannerPanel() {
     }
   }
 
+  const status = statusState.kind === "ready" ? statusState.status : null;
+  const tier = status ? statusTier(status.status) : "off";
+
   return (
-    <div className="panel-sync">
-      <p className="sync-lede">
+    <div className="scan-root">
+      <div className="scan-header">
+        <div className="scan-header-icon">📡</div>
+        <div className="scan-header-text">
+          <div className="scan-header-title">Scanner</div>
+          <div className="scan-header-tagline">Trunked &amp; conventional P25 · live status from Citadel's trunk-recorder</div>
+        </div>
+      </div>
+
+      <p className="scan-lede">
         Trunked-radio scanner (P25) status and setup. Citadel is the hardware side — the RTL-SDR dongle and the{" "}
         <code>trunk-recorder</code> decoder both run there — this panel is where you configure it and see what it
         hears, so all comms and emergency traffic stay in one place.
       </p>
 
-      <div className="sync-section">
-        <div className="sync-section-head">
-          <h3>Live Status</h3>
+      <div className="scan-status-row">
+        <div className="scan-status-left">
+          <span className={`scan-pill scan-pill-${tier}`}>
+            <span className="scan-dot" />
+            {status ? status.status.toUpperCase().replace("_", " ") : statusState.kind === "loading" ? "CHECKING…" : "UNREACHABLE"}
+          </span>
+          <span className="scan-status-name">TRUNK-RECORDER</span>
         </div>
-        {statusState.kind === "loading" && <div className="field-hint">Checking Citadel…</div>}
-        {statusState.kind === "unreachable" && (
-          <div className="sync-result sync-result-error">Could not reach Citadel: {statusState.message}</div>
-        )}
-        {statusState.kind === "ready" && (
-          <>
-            <div className="sync-result">
-              <span style={{ color: STATUS_COLORS[statusState.status.status] ?? "#888", fontWeight: "bold" }}>
-                {statusState.status.status.toUpperCase().replace("_", " ")}
-              </span>
-              {statusState.status.updated_at && <span className="field-hint"> — last update {statusState.status.updated_at}</span>}
-              {statusState.status.detail && <div className="field-hint">{statusState.status.detail}</div>}
-            </div>
-            {statusState.status.transcripts.length > 0 && (
-              <div className="sync-peer-list">
-                {statusState.status.transcripts.map((t, i) => (
-                  <div key={i} className="sync-peer-row">
-                    <span className="sync-peer-callsign">{t.talkgroup ?? "Unknown talkgroup"}</span>
-                    <span className="sync-peer-notes">
-                      {t.frequency_mhz !== null ? `${t.frequency_mhz} MHz` : ""} {t.started_at ?? ""}
-                      {t.transcript_text ? ` — ${t.transcript_text}` : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+        {status?.updated_at && <span className="scan-status-detail">last update {status.updated_at}</span>}
+      </div>
 
-            {statusState.status.systems.length > 0 && (
-              <>
-                <div className="sync-section-head">
-                  <h4>Systems</h4>
-                </div>
-                <table className="band-table">
+      {statusState.kind === "unreachable" && (
+        <div className="scan-result scan-result-error">Could not reach Citadel: {statusState.message}</div>
+      )}
+
+      {status && (
+        <>
+          {status.detail && <div className="scan-hint">{status.detail}</div>}
+
+          <div className="scan-tiles">
+            <div className="scan-tile">
+              <span className="scan-tile-label">Systems</span>
+              <span className="scan-tile-value">{status.systems.length}</span>
+            </div>
+            <div className="scan-tile">
+              <span className="scan-tile-label">Active Talkgroups</span>
+              <span className={`scan-tile-value ${status.active_calls.length > 0 ? "scan-tile-value-good" : ""}`}>
+                {status.active_calls.length}
+              </span>
+            </div>
+            <div className="scan-tile">
+              <span className="scan-tile-label">Recorders</span>
+              <span className="scan-tile-value">{status.recorders.length}</span>
+            </div>
+          </div>
+
+          {status.transcripts.length > 0 && (
+            <div className="scan-section">
+              <div className="scan-section-head">
+                <h3>Recent Transcripts</h3>
+              </div>
+              <div className="scan-table-wrap">
+                <table className="scan-table">
+                  <thead>
+                    <tr>
+                      <th>Talkgroup</th>
+                      <th>Freq</th>
+                      <th>Started</th>
+                      <th>Transcript</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {status.transcripts.map((t, i) => (
+                      <tr key={i}>
+                        <td>{t.talkgroup ?? "Unknown talkgroup"}</td>
+                        <td className="mono">{t.frequency_mhz !== null ? `${t.frequency_mhz} MHz` : "—"}</td>
+                        <td className="mono">{t.started_at ?? "—"}</td>
+                        <td>{t.transcript_text ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {status.systems.length > 0 && (
+            <div className="scan-section">
+              <div className="scan-section-head">
+                <h3>Systems</h3>
+              </div>
+              <div className="scan-table-wrap">
+                <table className="scan-table">
                   <thead>
                     <tr>
                       <th>Name</th>
@@ -226,64 +281,72 @@ function ScannerPanel() {
                       <th>Sys ID</th>
                       <th>WACN</th>
                       <th>NAC</th>
+                      <th>Active TGs</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {statusState.status.systems.map((s, i) => (
+                    {status.systems.map((s, i) => (
                       <tr key={i}>
                         <td>{s.name ?? "—"}</td>
                         <td>{s.system_type ?? "—"}</td>
                         <td className="mono">{s.sysid ?? "—"}</td>
                         <td className="mono">{s.wacn ?? "—"}</td>
                         <td className="mono">{s.nac ?? "—"}</td>
+                        <td className="mono">{status.active_calls.filter((c) => c.system === s.name).length}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </>
-            )}
-
-            <div className="sync-section-head">
-              <h4>Active Talkgroups (Live)</h4>
+              </div>
             </div>
-            {statusState.status.active_calls.length === 0 ? (
-              <div className="field-hint">No active calls right now.</div>
-            ) : (
-              <table className="band-table">
-                <thead>
-                  <tr>
-                    <th>System</th>
-                    <th>TGID</th>
-                    <th>Tag</th>
-                    <th>Freq (Hz)</th>
-                    <th>Elapsed (s)</th>
-                    <th>State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {statusState.status.active_calls.map((c, i) => (
-                    <tr key={i}>
-                      <td>{c.system ?? "—"}</td>
-                      <td className="mono">{c.talkgroup ?? "—"}</td>
-                      <td>{c.talkgroup_tag ?? "—"}</td>
-                      <td className="mono">{c.freq ?? "—"}</td>
-                      <td className="mono">{c.elapsed ?? "—"}</td>
-                      <td>
-                        {c.emergency === "1" && <span style={{ color: "#e64d4d", fontWeight: "bold" }}>EMERGENCY </span>}
-                        {c.encrypted === "1" ? "Encrypted" : c.state ?? "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+          )}
 
-            {statusState.status.recorders.length > 0 && (
-              <>
-                <div className="sync-section-head">
-                  <h4>Recorder Health</h4>
-                </div>
-                <table className="band-table">
+          <div className="scan-section">
+            <div className="scan-section-head">
+              <h3>Active Talkgroups (Live)</h3>
+            </div>
+            {status.active_calls.length === 0 ? (
+              <div className="scan-empty">No active calls right now.</div>
+            ) : (
+              <div className="scan-table-wrap">
+                <table className="scan-table">
+                  <thead>
+                    <tr>
+                      <th>System</th>
+                      <th>TGID</th>
+                      <th>Tag</th>
+                      <th>Freq (Hz)</th>
+                      <th>Elapsed (s)</th>
+                      <th>State</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {status.active_calls.map((c, i) => (
+                      <tr key={i}>
+                        <td>{c.system ?? "—"}</td>
+                        <td className="mono">{c.talkgroup ?? "—"}</td>
+                        <td>{c.talkgroup_tag ?? "—"}</td>
+                        <td className="mono">{c.freq ?? "—"}</td>
+                        <td className="mono">{c.elapsed ?? "—"}</td>
+                        <td>
+                          {c.emergency === "1" && <span className="scan-emergency">EMERGENCY </span>}
+                          {c.encrypted === "1" ? "Encrypted" : c.state ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {status.recorders.length > 0 && (
+            <div className="scan-section">
+              <div className="scan-section-head">
+                <h3>Recorder Health</h3>
+              </div>
+              <div className="scan-table-wrap">
+                <table className="scan-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -294,7 +357,7 @@ function ScannerPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {statusState.status.recorders.map((r, i) => (
+                    {status.recorders.map((r, i) => (
                       <tr key={i}>
                         <td className="mono">{r.id ?? "—"}</td>
                         <td>{r.recorder_type ?? "—"}</td>
@@ -305,25 +368,25 @@ function ScannerPanel() {
                     ))}
                   </tbody>
                 </table>
-              </>
-            )}
-
-            {statusState.status.systems.length === 0 && statusState.status.status === "no_data" && (
-              <div className="field-hint">
-                Nothing has connected yet. Once trunk-recorder is running with a real config (see Setup below) and
-                its <code>statusServer</code> is reachable, real systems, live talkgroup activity, and recorder
-                health will show up here automatically.
               </div>
-            )}
-          </>
-        )}
-      </div>
+            </div>
+          )}
 
-      <div className="sync-section">
-        <div className="sync-section-head">
+          {status.systems.length === 0 && status.status === "no_data" && (
+            <div className="scan-hint">
+              Nothing has connected yet. Once trunk-recorder is running with a real config (see Setup below) and
+              its <code>statusServer</code> is reachable, real systems, live talkgroup activity, and recorder
+              health will show up here automatically.
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="scan-section">
+        <div className="scan-section-head">
           <h3>Setup</h3>
         </div>
-        <p className="field-hint">
+        <p className="scan-hint">
           Trunked systems (single control channel, many talkgroups) and conventional systems (each channel on its
           own fixed frequency — typical for county Sheriff/Fire/EMS dispatch) are both real, different shapes;
           pick the one that matches what you actually have. Local systems are never automatic — every county
@@ -335,26 +398,26 @@ function ScannerPanel() {
           </a>{" "}
           gives frequencies straight from FCC license filings with no account at all.
         </p>
-        {configuredOnCitadel && <div className="sync-result sync-result-ok">A scanner config already exists on Citadel — loaded below.</div>}
-        <form className="sync-peer-form" onSubmit={saveConfig} style={{ flexDirection: "column", alignItems: "stretch" }}>
-          <label className="field-hint">System type</label>
+        {configuredOnCitadel && <div className="scan-result scan-result-ok">A scanner config already exists on Citadel — loaded below.</div>}
+        <form className="scan-form" onSubmit={saveConfig}>
+          <label>System type</label>
           <select value={systemType} onChange={(e) => setSystemType(e.currentTarget.value as SystemType)}>
             <option value="trunked">Trunked (P25) — one control channel, many talkgroups</option>
             <option value="conventional">Conventional — fixed-frequency channels, analog</option>
             <option value="conventionalP25">Conventional — fixed-frequency channels, P25 digital</option>
           </select>
 
-          <label className="field-hint">System name (short)</label>
+          <label>System name (short)</label>
           <input value={shortName} onChange={(e) => setShortName(e.currentTarget.value)} placeholder="e.g. cofire" maxLength={6} required />
 
-          <label className="field-hint">SDR driver / device</label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <label>SDR driver / device</label>
+          <div className="scan-form-row">
             <input value={driver} onChange={(e) => setDriver(e.currentTarget.value)} placeholder="osmosdr" />
             <input value={device} onChange={(e) => setDevice(e.currentTarget.value)} placeholder="rtl=0" />
           </div>
 
-          <label className="field-hint">Center frequency (MHz) / sample rate (MHz) / gain / PPM (optional)</label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <label>Center frequency (MHz) / sample rate (MHz) / gain / PPM (optional)</label>
+          <div className="scan-form-row">
             <input value={centerMhz} onChange={(e) => setCenterMhz(e.currentTarget.value)} placeholder="857.0" />
             <input value={rateMhz} onChange={(e) => setRateMhz(e.currentTarget.value)} placeholder="8.0" />
             <input value={gain} onChange={(e) => setGain(e.currentTarget.value)} placeholder="40" />
@@ -363,7 +426,7 @@ function ScannerPanel() {
 
           {systemType === "trunked" ? (
             <>
-              <label className="field-hint">Control channel frequencies (MHz, comma-separated)</label>
+              <label>Control channel frequencies (MHz, comma-separated)</label>
               <input
                 value={controlChannelsMhz}
                 onChange={(e) => setControlChannelsMhz(e.currentTarget.value)}
@@ -371,24 +434,23 @@ function ScannerPanel() {
                 required
               />
 
-              <label className="field-hint">Talkgroups CSV (paste, or upload a file)</label>
+              <label>Talkgroups CSV (paste, or upload a file)</label>
               <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
               <textarea
                 value={talkgroupsCsv}
                 onChange={(e) => setTalkgroupsCsv(e.currentTarget.value)}
                 placeholder="Decimal,Mode,Description,Alpha Tag,Priority&#10;101,D,01 Dispatch,DCFD 01 Disp,1"
                 rows={6}
-                style={{ fontFamily: "monospace" }}
                 required
               />
             </>
           ) : (
             <>
-              <label className="field-hint">Squelch (dB)</label>
+              <label>Squelch (dB)</label>
               <input value={squelch} onChange={(e) => setSquelch(e.currentTarget.value)} placeholder="-50" required />
 
-              <label className="field-hint">Channel list CSV (paste, or upload a file)</label>
-              <p className="field-hint">
+              <label>Channel list CSV (paste, or upload a file)</label>
+              <p className="scan-hint">
                 <code>TG Number</code> must be the first column (any whole number — these frequencies don't have
                 real talkgroup numbers, just make one up per row) and <code>Frequency</code> is required.{" "}
                 <code>Tone</code> (CTCSS, analog only), <code>Alpha Tag</code>, and <code>Description</code> are
@@ -402,18 +464,17 @@ function ScannerPanel() {
                   "TG Number,Frequency,Tone,Alpha Tag,Description\n1,155.7750,114.8,Sheriff Disp,County Sheriff Dispatch"
                 }
                 rows={6}
-                style={{ fontFamily: "monospace" }}
                 required
               />
             </>
           )}
 
-          <button type="submit" disabled={saveState.kind === "saving"}>
+          <button className="scan-submit-btn" type="submit" disabled={saveState.kind === "saving"}>
             {saveState.kind === "saving" ? "Saving…" : "Save to Citadel"}
           </button>
         </form>
-        {saveState.kind === "done" && <div className="sync-result sync-result-ok">Saved — Citadel wrote a real trunk-recorder config.</div>}
-        {saveState.kind === "error" && <div className="sync-result sync-result-error">{saveState.message}</div>}
+        {saveState.kind === "done" && <div className="scan-result scan-result-ok">Saved — Citadel wrote a real trunk-recorder config.</div>}
+        {saveState.kind === "error" && <div className="scan-result scan-result-error">{saveState.message}</div>}
       </div>
     </div>
   );
