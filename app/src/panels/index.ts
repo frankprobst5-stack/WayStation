@@ -35,6 +35,7 @@ import WeatherPanel from "./WeatherPanel";
 import DxClusterPanel from "./DxClusterPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
+import FieldReferencePanel from "./FieldReferencePanel";
 import RigControlPanel from "./RigControlPanel";
 import RotatorControlPanel from "./RotatorControlPanel";
 import UserManualPanel from "./UserManualPanel";
@@ -310,6 +311,17 @@ registerPanel({
   width: "full",
   height: "natural",
   component: ChannelDirectoryPanel,
+});
+
+registerPanel({
+  id: "field-reference",
+  title: "Field Reference (Kiwix Library Search)",
+  category: "reference",
+  refreshCadenceSeconds: null,
+  offlineBehavior: "degrades",
+  width: "full",
+  height: "tall",
+  component: FieldReferencePanel,
 });
 
 registerPanel({

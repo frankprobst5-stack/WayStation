@@ -10,6 +10,7 @@ mod dispatch;
 mod dxcluster;
 mod flight_tracking;
 mod js8call;
+mod kiwix_search;
 mod maidenhead;
 mod mesh;
 mod net_sync;
@@ -143,6 +144,8 @@ pub fn run() {
             db::get_traffic_counts,
             db::get_recent_activity,
             ai_sitrep::generate_sitrep_narrative,
+            kiwix_search::list_kiwix_books,
+            kiwix_search::search_kiwix_library,
             system_health::get_system_health,
             db::get_or_create_signing_secret,
             db::add_trusted_peer,

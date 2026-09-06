@@ -82,6 +82,10 @@ pub struct StationProfile {
     /// -- the device has its own reachable IP on the home LAN, so
     /// WayStation polls it directly.
     pub local_weather_host: Option<String>,
+    /// Kiwix's own host port (Citadel's `docker-compose.yml` exposes it
+    /// directly, not behind the cockpit nginx proxy) -- see
+    /// kiwix_search.rs. None means the local default (127.0.0.1:8095).
+    pub citadel_kiwix_host: Option<String>,
     /// This station's own WSP/1 object-signing secret (HMAC-SHA256 key,
     /// see sync.rs). Not a Station-form field, same reasoning as
     /// `manual_offline`/`tactical_mode` -- generated once via
@@ -124,6 +128,7 @@ impl Default for StationProfile {
             citadel_map_host: None,
             local_weather_brand: None,
             local_weather_host: None,
+            citadel_kiwix_host: None,
             signing_secret: None,
             theme: "dark".to_string(),
             updated_at: None,
@@ -133,7 +138,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -153,7 +158,8 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 theme: row.get(13)?,
                 local_weather_brand: row.get(14)?,
                 local_weather_host: row.get(15)?,
-                updated_at: row.get(16)?,
+                citadel_kiwix_host: row.get(16)?,
+                updated_at: row.get(17)?,
             })
         },
     )
@@ -241,6 +247,7 @@ fn save_station_profile_conn(
     citadel_map_host: Option<String>,
     local_weather_brand: Option<String>,
     local_weather_host: Option<String>,
+    citadel_kiwix_host: Option<String>,
 ) -> StationProfile {
     let now = chrono::Utc::now().to_rfc3339();
     // The Station form doesn't own the offline flag, tactical_mode, the
@@ -253,8 +260,8 @@ fn save_station_profile_conn(
     let signing_secret = existing.signing_secret;
     let theme = existing.theme;
     conn.execute(
-        "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, local_weather_brand, local_weather_host, updated_at)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, local_weather_brand, local_weather_host, citadel_kiwix_host, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
             callsign = excluded.callsign,
             grid_square = excluded.grid_square,
@@ -268,8 +275,9 @@ fn save_station_profile_conn(
             citadel_map_host = excluded.citadel_map_host,
             local_weather_brand = excluded.local_weather_brand,
             local_weather_host = excluded.local_weather_host,
+            citadel_kiwix_host = excluded.citadel_kiwix_host,
             updated_at = excluded.updated_at",
-        params![callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled as i64, rotctld_host, rotator_enabled as i64, citadel_map_host, local_weather_brand, local_weather_host, now],
+        params![callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled as i64, rotctld_host, rotator_enabled as i64, citadel_map_host, local_weather_brand, local_weather_host, citadel_kiwix_host, now],
     )
     .expect("failed to save station_profile");
 
@@ -288,6 +296,7 @@ fn save_station_profile_conn(
         citadel_map_host,
         local_weather_brand,
         local_weather_host,
+        citadel_kiwix_host,
         signing_secret,
         theme,
         updated_at: Some(now),
@@ -310,6 +319,7 @@ pub fn save_station_profile(
     citadel_map_host: Option<String>,
     local_weather_brand: Option<String>,
     local_weather_host: Option<String>,
+    citadel_kiwix_host: Option<String>,
 ) -> StationProfile {
     let conn = db.0.lock().expect("db mutex poisoned");
     save_station_profile_conn(
@@ -326,6 +336,7 @@ pub fn save_station_profile(
         citadel_map_host,
         local_weather_brand,
         local_weather_host,
+        citadel_kiwix_host,
     )
 }
 
@@ -4245,6 +4256,16 @@ const MIGRATIONS: &[&str] = &[
         pressure_inhg      REAL
     );
     "#,
+    // v44: local field-reference library search, decided 2026-09-06 --
+    // the Planned backlog's "local field-reference knowledge base" item.
+    // Separate host field from citadel_map_host on purpose: Kiwix is
+    // exposed directly on its own host port (see Citadel's
+    // docker-compose.yml, 8095 by default), not proxied through the
+    // cockpit nginx the way scanner/weather/chat are -- a different real
+    // service, same multi-field pattern as mesh_host/local_weather_host.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN citadel_kiwix_host TEXT;
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4448,7 +4469,7 @@ mod tests {
         // save_station_profile doesn't own theme -- same as tactical_mode
         // and the signing secret -- so saving the Station form must not
         // silently reset it back to the default.
-        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None, None, None);
+        save_station_profile_conn(&conn, Some("KJ4ESQ".to_string()), None, None, None, None, None, true, None, true, None, None, None, None);
 
         assert_eq!(station_profile(&conn).theme, "red");
     }

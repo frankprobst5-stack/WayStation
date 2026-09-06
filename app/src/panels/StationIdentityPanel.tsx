@@ -15,6 +15,7 @@ interface StationProfile {
   citadel_map_host: string | null;
   local_weather_brand: string | null;
   local_weather_host: string | null;
+  citadel_kiwix_host: string | null;
   updated_at: string | null;
 }
 
@@ -42,6 +43,7 @@ function StationIdentityPanel() {
   const [citadelMapHost, setCitadelMapHost] = useState("");
   const [localWeatherBrand, setLocalWeatherBrand] = useState("");
   const [localWeatherHost, setLocalWeatherHost] = useState("");
+  const [citadelKiwixHost, setCitadelKiwixHost] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
   useEffect(() => {
@@ -59,6 +61,7 @@ function StationIdentityPanel() {
       setCitadelMapHost(p.citadel_map_host ?? "");
       setLocalWeatherBrand(p.local_weather_brand ?? "");
       setLocalWeatherHost(p.local_weather_host ?? "");
+      setCitadelKiwixHost(p.citadel_kiwix_host ?? "");
     });
   }, []);
 
@@ -82,6 +85,7 @@ function StationIdentityPanel() {
       citadelMapHost: citadelMapHost.trim() || null,
       localWeatherBrand: localWeatherBrand || null,
       localWeatherHost: localWeatherHost.trim() || null,
+      citadelKiwixHost: citadelKiwixHost.trim() || null,
     });
     setProfile(updated);
     setSaveState("saved");
@@ -245,6 +249,20 @@ function StationIdentityPanel() {
           The console/gateway's own address on your local network — WayStation polls it directly, no
           Citadel or internet involved. Port defaults to 80 for both brands. See the Weather panel for
           the current reading.
+        </span>
+      </label>
+      <label>
+        Citadel field-reference library (Kiwix)
+        <input
+          value={citadelKiwixHost}
+          onChange={(e) => setCitadelKiwixHost(e.currentTarget.value)}
+          placeholder="127.0.0.1:8095"
+        />
+        <span className="field-hint">
+          Where Citadel's Kiwix server is reachable -- lets Field Reference (Reference tab) search
+          your offline library (Ready.gov, field manuals, etc.) by keyword. Blank uses this
+          computer's default. Not AI or semantic search -- real keyword matches from your own
+          local library, with excerpts.
         </span>
       </label>
       <button type="submit" disabled={!gridValid || saveState === "saving"}>
