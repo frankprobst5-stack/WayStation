@@ -11,6 +11,7 @@ import { startRulesEngine } from "./rules/engine";
 import TimeBar from "./TimeBar";
 import StatusLights from "./StatusLights";
 import FirstRunWizard from "./FirstRunWizard";
+import DashboardPage from "./DashboardPage";
 import "./App.css";
 
 const TAB_ORDER: PanelCategory[] = [
@@ -56,7 +57,10 @@ function App() {
   }, []);
 
   const visible = tacticalMode ? panels.filter((p) => !p.hobbyist) : panels;
-  const tabs = TAB_ORDER.filter((cat) => visible.some((p) => p.category === cat));
+  // "dashboard" always gets a tab even though no panel registers under it
+  // anymore -- DashboardPage is rendered directly for it below, not
+  // assembled from the generic per-category panel stack.
+  const tabs = TAB_ORDER.filter((cat) => cat === "dashboard" || visible.some((p) => p.category === cat));
   const visiblePanels = visible.filter((p) => p.category === activeTab);
 
   return (
@@ -93,23 +97,27 @@ function App() {
           <StatusLights />
         </div>
 
-        <main className="panel-grid">
-          {visiblePanels.map((panel) => {
-            const PanelComponent = panel.component;
-            return (
-              <section
-                key={panel.id}
-                className="panel"
-                aria-label={panel.title}
-                data-width={panel.width ?? "standard"}
-                data-height={panel.height ?? "standard"}
-              >
-                <h2 className="panel-title">{panel.title}</h2>
-                <PanelComponent />
-              </section>
-            );
-          })}
-        </main>
+        {activeTab === "dashboard" ? (
+          <DashboardPage onNavigate={setActiveTab} />
+        ) : (
+          <main className="panel-grid">
+            {visiblePanels.map((panel) => {
+              const PanelComponent = panel.component;
+              return (
+                <section
+                  key={panel.id}
+                  className="panel"
+                  aria-label={panel.title}
+                  data-width={panel.width ?? "standard"}
+                  data-height={panel.height ?? "standard"}
+                >
+                  <h2 className="panel-title">{panel.title}</h2>
+                  <PanelComponent />
+                </section>
+              );
+            })}
+          </main>
+        )}
       </div>
     </div>
   );

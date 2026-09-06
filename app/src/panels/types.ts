@@ -25,6 +25,16 @@ export type OfflineBehavior = "always-available" | "degrades" | "internet-only";
  * overloaded tabs -- each of tactical-map/flight-tracking/scanner/weather
  * is substantial enough to be its own page, not a fragment.
  */
+/**
+ * "dashboard" is special: as of 2026-09-05, App.tsx renders `DashboardPage`
+ * directly for this tab instead of stacking whatever panels are
+ * registered under it, so no panel should register itself here anymore --
+ * the composite dashboard pulls its own data straight from the same
+ * commands the individual panels use (rig/rotator status, connectivity,
+ * incident_info, space/local weather, channels), it doesn't wrap them.
+ * Kept in the union purely so it still has a tab label and a place in
+ * TAB_ORDER.
+ */
 export type PanelCategory =
   | "dashboard"
   | "incident-ops"

@@ -2894,3 +2894,473 @@ select {
   color: var(--red);
   font-size: 0.72rem;
 }
+
+/* ============================================================
+   Dashboard (2026-09-05) -- DashboardPage.tsx, rendered directly
+   by App.tsx for the "dashboard" tab instead of the generic
+   panel-grid stack every other tab uses. Every `.dash-*` class
+   below is deliberately separate from the generic `.panel`/
+   `.panel-title`/`.pill` classes above -- this started life as a
+   standalone mockup with its own (colliding) class names, and
+   reusing those names here would have silently reskinned every
+   other tab's panels. All colors come from the same theme tokens
+   as the rest of the app, so this honors dark/light/red exactly
+   like everything else -- nothing here is a separate palette.
+   ============================================================ */
+
+.dash-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.1rem 1.25rem 1.4rem;
+  overflow-y: auto;
+}
+
+.dash-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.85rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dash-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-panel-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dash-empty {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 0.4rem 0;
+}
+
+.dash-pill {
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.dash-pill-standby {
+  background: var(--surface-2);
+  color: var(--gold);
+  border: 1px solid var(--border-strong);
+}
+.dash-pill-active {
+  background: var(--surface-2);
+  color: var(--red);
+  border: 1px solid var(--border-strong);
+}
+.dash-pill-ok {
+  background: var(--surface-2);
+  color: var(--green);
+  border: 1px solid var(--border-strong);
+}
+
+.dash-ghost-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 0.32rem 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dash-ghost-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--amber);
+}
+
+.dash-primary-btn {
+  background: linear-gradient(155deg, var(--amber), var(--amber-dim));
+  color: var(--bg-app);
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  flex: 1;
+}
+.dash-primary-btn:hover {
+  filter: brightness(1.08);
+}
+
+.dash-footer-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+/* Row 1 -- operational status */
+.dash-row-status {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 0.9rem;
+  flex-shrink: 0;
+}
+
+.dash-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.dash-status-chip {
+  flex: 1 1 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 7px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+.dash-status-chip-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dash-status-chip-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.dash-status-chip-value {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.dash-status-chip-value-good { color: var(--green); }
+.dash-status-chip-value-bad { color: var(--red); }
+.dash-status-chip-value-warn { color: var(--gold); }
+.dash-status-chip-value-off { color: var(--status-off); }
+
+.dash-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+  background: var(--status-off);
+}
+.dash-dot-good { background: var(--green); }
+.dash-dot-bad { background: var(--red); }
+.dash-dot-warn { background: var(--gold); }
+.dash-dot-off { background: var(--status-off); opacity: 0.6; }
+
+.dash-health-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  justify-content: center;
+  flex: 1;
+}
+.dash-health-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 40px;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+}
+.dash-health-track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.dash-health-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--amber);
+}
+
+/* Row 2 -- hero: map + incident */
+.dash-row-hero {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 0.9rem;
+  flex-shrink: 0;
+}
+
+.dash-map-panel {
+  padding: 0.85rem 1rem 0.85rem;
+}
+
+.dash-map-embed {
+  margin-top: -0.2rem;
+}
+/* TacticalMapPanel brings its own real layout/toolbar/legend -- this just
+   nests it, it doesn't reimplement or shrink it. */
+
+.dash-incident-panel {
+  gap: 0.5rem;
+}
+
+.dash-field-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.22rem 0.6rem;
+  font-size: 0.76rem;
+  margin: 0;
+}
+.dash-field-grid dt {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  align-self: center;
+}
+.dash-field-grid dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.dash-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.3rem 0;
+}
+
+.dash-traffic-title {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.dash-traffic-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.14rem 0;
+  font-size: 0.78rem;
+}
+.dash-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.dash-traffic-count {
+  font-weight: 700;
+}
+
+.dash-incident-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+/* Row 3 -- radio / rotator / comms / activity */
+.dash-row-quad {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.9rem;
+  flex-shrink: 0;
+}
+
+.dash-kv-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  padding: 0.18rem 0;
+  color: var(--text-muted);
+}
+.dash-kv-row strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.dash-dial {
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  margin: 0.3rem auto 0.5rem;
+  position: relative;
+  background: var(--surface-1);
+}
+.dash-dial span {
+  position: absolute;
+  font-size: 0.55rem;
+  color: var(--text-muted);
+}
+.dash-dial-n { top: 3px; left: 50%; transform: translateX(-50%); }
+.dash-dial-s { bottom: 3px; left: 50%; transform: translateX(-50%); }
+.dash-dial-e { right: 4px; top: 50%; transform: translateY(-50%); }
+.dash-dial-w { left: 4px; top: 50%; transform: translateY(-50%); }
+.dash-dial-needle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 34px;
+  background: var(--amber);
+  transform-origin: top center;
+  margin-left: -1px;
+}
+
+.dash-comms-list,
+.dash-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.dash-comms-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.32rem 0.1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+.dash-comms-row:last-child { border-bottom: none; }
+.dash-via-label {
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-activity-row {
+  display: flex;
+  gap: 0.55rem;
+  font-size: 0.73rem;
+  padding: 0.28rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.dash-activity-row:last-child { border-bottom: none; }
+.dash-activity-time {
+  color: var(--amber);
+  flex-shrink: 0;
+}
+.dash-activity-text {
+  color: var(--text-muted);
+}
+
+/* Row 4 -- space weather / local weather / tactical nets */
+.dash-row-tri {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.1fr;
+  gap: 0.9rem;
+  flex-shrink: 0;
+}
+
+.dash-swx-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+.dash-swx-tile {
+  text-align: center;
+  padding: 0.4rem 0.2rem;
+  border-radius: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+.dash-swx-v {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.dash-swx-l {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-band-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  margin-top: 0.5rem;
+}
+.dash-band-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding-bottom: 0.3rem;
+}
+.dash-band-table td {
+  padding: 0.24rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.dash-weather-hero {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.3rem 0 0.6rem;
+}
+.dash-weather-temp {
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.dash-weather-sub {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.dash-nets-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.73rem;
+}
+.dash-nets-table td {
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--border);
+}
+.dash-nets-table td:last-child {
+  text-align: right;
+  color: var(--amber);
+}
+
+@media (max-width: 1100px) {
+  .dash-row-status,
+  .dash-row-hero {
+    grid-template-columns: 1fr;
+  }
+  .dash-row-quad {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .dash-row-tri {
+    grid-template-columns: 1fr;
+  }
+}

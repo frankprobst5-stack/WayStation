@@ -516,6 +516,151 @@ pub fn save_incident_info(
     }
 }
 
+/// Real counts for the Dashboard's Incident Status traffic section --
+/// every one of `messages.precedence`'s four real values (routine,
+/// priority, immediate, emergency) is its own honest count rather than
+/// folding "immediate" into "priority" to match a mockup that only had
+/// three rows; a real distinct precedence deserves a real distinct number.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct TrafficCounts {
+    pub emergency: i64,
+    pub immediate: i64,
+    pub priority: i64,
+    pub routine: i64,
+    pub checked_in: i64,
+}
+
+pub fn get_traffic_counts_conn(conn: &Connection) -> TrafficCounts {
+    let mut counts = TrafficCounts::default();
+    let mut stmt = conn
+        .prepare("SELECT precedence, COUNT(*) FROM messages GROUP BY precedence")
+        .expect("failed to prepare traffic-count query");
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        .expect("failed to run traffic-count query");
+    for row in rows {
+        let (precedence, count) = row.expect("failed to read traffic-count row");
+        match precedence.as_str() {
+            "emergency" => counts.emergency = count,
+            "immediate" => counts.immediate = count,
+            "priority" => counts.priority = count,
+            "routine" => counts.routine = count,
+            _ => {}
+        }
+    }
+    counts.checked_in = conn
+        .query_row(
+            "SELECT COUNT(*) FROM net_roster WHERE status = 'checked_in'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("failed to count checked-in roster entries");
+    counts
+}
+
+#[tauri::command]
+pub fn get_traffic_counts(db: State<Db>) -> TrafficCounts {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_traffic_counts_conn(&conn)
+}
+
+/// One real, already-happened event for the Dashboard's Recent Activity
+/// feed. Deliberately not backed by a new table this app would then have
+/// to remember to write into from every ingest/dispatch site -- instead
+/// this merges the most recent rows already sitting in four tables that
+/// already record real timestamped events for their own reasons
+/// (delivery_attempts, incident_events, mesh_messages, messages), and
+/// sorts the merge. Every entry here is something that genuinely happened;
+/// there is no synthetic or placeholder entry anywhere in this path.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityEntry {
+    pub occurred_at: String,
+    pub summary: String,
+}
+
+fn describe_delivery_attempt(object_type: &str, transport: &str, result: &str, detail: Option<&str>) -> String {
+    let what = if object_type == "marker" { "Marker" } else { "Message" };
+    if result == "success" {
+        format!("{what} delivered via {transport}")
+    } else {
+        match detail {
+            Some(d) => format!("{what} failed via {transport}: {d}"),
+            None => format!("{what} failed via {transport}"),
+        }
+    }
+}
+
+pub fn get_recent_activity_conn(conn: &Connection, limit: usize) -> Vec<ActivityEntry> {
+    let mut entries: Vec<ActivityEntry> = Vec::new();
+
+    let mut stmt = conn
+        .prepare("SELECT attempted_at, object_type, transport, result, detail FROM delivery_attempts ORDER BY attempted_at DESC LIMIT ?1")
+        .expect("failed to prepare delivery_attempts activity query");
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            let occurred_at: String = row.get(0)?;
+            let object_type: String = row.get(1)?;
+            let transport: String = row.get(2)?;
+            let result: String = row.get(3)?;
+            let detail: Option<String> = row.get(4)?;
+            Ok(ActivityEntry {
+                occurred_at,
+                summary: describe_delivery_attempt(&object_type, &transport, &result, detail.as_deref()),
+            })
+        })
+        .expect("failed to run delivery_attempts activity query");
+    entries.extend(rows.map(|r| r.expect("failed to read delivery_attempts activity row")));
+
+    let mut stmt = conn
+        .prepare("SELECT occurred_at, summary FROM incident_events ORDER BY occurred_at DESC LIMIT ?1")
+        .expect("failed to prepare incident_events activity query");
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            Ok(ActivityEntry { occurred_at: row.get(0)?, summary: row.get(1)? })
+        })
+        .expect("failed to run incident_events activity query");
+    entries.extend(rows.map(|r| r.expect("failed to read incident_events activity row")));
+
+    let mut stmt = conn
+        .prepare("SELECT received_at, text, outbound FROM mesh_messages ORDER BY received_at DESC LIMIT ?1")
+        .expect("failed to prepare mesh_messages activity query");
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            let occurred_at: String = row.get(0)?;
+            let text: String = row.get(1)?;
+            let outbound: i64 = row.get(2)?;
+            let direction = if outbound != 0 { "sent" } else { "received" };
+            let preview: String = text.chars().take(40).collect();
+            Ok(ActivityEntry { occurred_at, summary: format!("Mesh message {direction}: {preview}") })
+        })
+        .expect("failed to run mesh_messages activity query");
+    entries.extend(rows.map(|r| r.expect("failed to read mesh_messages activity row")));
+
+    let mut stmt = conn
+        .prepare("SELECT date_time, precedence, subject FROM messages ORDER BY date_time DESC LIMIT ?1")
+        .expect("failed to prepare messages activity query");
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            let occurred_at: String = row.get(0)?;
+            let precedence: String = row.get(1)?;
+            let subject: Option<String> = row.get(2)?;
+            let subject = subject.filter(|s| !s.is_empty()).unwrap_or_else(|| "no subject".to_string());
+            Ok(ActivityEntry { occurred_at, summary: format!("{precedence} message logged: {subject}") })
+        })
+        .expect("failed to run messages activity query");
+    entries.extend(rows.map(|r| r.expect("failed to read messages activity row")));
+
+    entries.sort_by(|a, b| b.occurred_at.cmp(&a.occurred_at));
+    entries.truncate(limit);
+    entries
+}
+
+#[tauri::command]
+pub fn get_recent_activity(db: State<Db>) -> Vec<ActivityEntry> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_recent_activity_conn(&conn, 8)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Incident {
     pub id: i64,
@@ -4316,6 +4461,59 @@ mod tests {
     // QSO log after an update.
 
     #[test]
+    fn recent_activity_on_a_fresh_db_is_honestly_empty() {
+        let conn = fresh_db();
+        assert!(get_recent_activity_conn(&conn, 8).is_empty());
+    }
+
+    #[test]
+    fn recent_activity_merges_and_sorts_real_rows_from_all_four_sources() {
+        let conn = fresh_db();
+        conn.execute(
+            "INSERT INTO delivery_attempts (object_type, object_uuid, transport, attempted_at, result, detail) VALUES ('message', 'm-1', 'winlink', '2026-09-05T10:00:00Z', 'success', NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO incident_events (incident_id, event_type, summary, occurred_at) VALUES ('inc-1', 'declared', 'Incident declared: Panhandle Weather', '2026-09-05T09:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO mesh_messages (from_node, to_node, channel, text, rx_time, received_at, outbound) VALUES (1, 0, 0, 'position update', 0, '2026-09-05T11:00:00Z', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (precedence, date_time, message_text, subject, uuid, updated_at, trust_state) VALUES ('routine', '2026-09-05T08:00:00Z', 'test', 'Generator fuel request', 'msg-activity-1', '2026-09-05T08:00:00Z', 'local')",
+            [],
+        )
+        .unwrap();
+
+        let entries = get_recent_activity_conn(&conn, 8);
+        assert_eq!(entries.len(), 4);
+        // Newest first: mesh (11:00) > delivery (10:00) > incident (09:00) > message (08:00).
+        assert!(entries[0].summary.contains("Mesh message received"));
+        assert!(entries[1].summary.contains("delivered via winlink"));
+        assert!(entries[2].summary.contains("Panhandle Weather"));
+        assert!(entries[3].summary.contains("Generator fuel request"));
+    }
+
+    #[test]
+    fn recent_activity_respects_the_limit_after_merging() {
+        let conn = fresh_db();
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO delivery_attempts (object_type, object_uuid, transport, attempted_at, result, detail) VALUES ('message', ?1, 'js8call', ?2, 'success', NULL)",
+                params![format!("m-{i}"), format!("2026-09-05T10:0{i}:00Z")],
+            )
+            .unwrap();
+        }
+        let entries = get_recent_activity_conn(&conn, 3);
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
     fn qso_log_round_trip() {
         let conn = fresh_db();
         conn.execute(
@@ -4367,6 +4565,46 @@ mod tests {
         let channels: i64 = conn.query_row("SELECT COUNT(*) FROM channels", [], |r| r.get(0)).unwrap();
         let roster: i64 = conn.query_row("SELECT COUNT(*) FROM net_roster", [], |r| r.get(0)).unwrap();
         assert_eq!((resources, channels, roster), (1, 1, 1));
+    }
+
+    #[test]
+    fn traffic_counts_on_a_fresh_db_are_all_honestly_zero() {
+        let conn = fresh_db();
+        let counts = get_traffic_counts_conn(&conn);
+        assert_eq!((counts.emergency, counts.immediate, counts.priority, counts.routine, counts.checked_in), (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn traffic_counts_reflect_real_messages_and_roster_state() {
+        let conn = fresh_db();
+        for (precedence, n) in [("emergency", 2), ("immediate", 1), ("priority", 3), ("routine", 5)] {
+            for i in 0..n {
+                conn.execute(
+                    "INSERT INTO messages (precedence, date_time, message_text, uuid, updated_at, trust_state) VALUES (?1, '2026-09-05T00:00:00Z', 'test', ?2, '2026-09-05T00:00:00Z', 'local')",
+                    params![precedence, format!("{precedence}-{i}")],
+                )
+                .unwrap();
+            }
+        }
+        conn.execute(
+            "INSERT INTO net_roster (callsign, name, status, checked_in_at, last_heard_at, traffic_count, notes) VALUES ('KJ4ESQ', 'Frank', 'checked_in', '2026-09-05T00:00:00Z', NULL, 0, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO net_roster (callsign, name, status, checked_in_at, last_heard_at, traffic_count, notes) VALUES ('N0CALL', 'Someone', 'checked_out', '2026-09-05T00:00:00Z', NULL, 0, NULL)",
+            [],
+        )
+        .unwrap();
+
+        let counts = get_traffic_counts_conn(&conn);
+        assert_eq!(counts.emergency, 2);
+        assert_eq!(counts.immediate, 1);
+        assert_eq!(counts.priority, 3);
+        assert_eq!(counts.routine, 5);
+        // Only the checked-in roster entry counts -- a checked-out one
+        // isn't a present check-in, real or otherwise.
+        assert_eq!(counts.checked_in, 1);
     }
 
     #[test]

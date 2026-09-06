@@ -6,6 +6,12 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd app && npm run dev"],
       "port": 1420
+    },
+    {
+      "name": "mockup-scratchpad",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8734", "--directory", "/tmp/claude-1000/-home-frank-Desktop-waystation/545dd98d-c4b4-4f40-978d-0013b0ded99b/scratchpad"],
+      "port": 8734
     }
   ]
 }

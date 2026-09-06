@@ -24,6 +24,7 @@ mod rotator;
 mod satellite;
 mod space_weather;
 mod sync;
+mod system_health;
 mod transport;
 mod weather_station;
 
@@ -100,6 +101,8 @@ pub fn run() {
             app.manage(mesh::MeshState::new());
             app.manage(discovery::DiscoveryState::new());
             app.manage(auto_sync::AutoSyncState::new());
+            app.manage(system_health::SystemHealthState::new());
+            system_health::spawn_poller(app.handle().clone());
             discovery::spawn_advertiser(app.handle().clone());
             discovery::spawn_browser(app.handle().clone());
             net_sync::spawn_listener(app.handle().clone());
@@ -127,6 +130,9 @@ pub fn run() {
             db::save_station_profile,
             db::set_tactical_mode,
             db::set_theme,
+            db::get_traffic_counts,
+            db::get_recent_activity,
+            system_health::get_system_health,
             db::get_or_create_signing_secret,
             db::add_trusted_peer,
             db::get_trusted_peers,

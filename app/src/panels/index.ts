@@ -46,7 +46,7 @@ import SyncPanel from "./SyncPanel";
 registerPanel({
   id: "world-map",
   title: "World Map",
-  category: "dashboard",
+  category: "tactical-map",
   refreshCadenceSeconds: 60,
   offlineBehavior: "always-available",
   width: "full",
@@ -57,7 +57,7 @@ registerPanel({
 registerPanel({
   id: "rig-control",
   title: "Rig Control",
-  category: "dashboard",
+  category: "tools",
   refreshCadenceSeconds: 2,
   offlineBehavior: "always-available",
   width: "wide",
@@ -68,7 +68,7 @@ registerPanel({
 registerPanel({
   id: "rotator-control",
   title: "Rotator Control",
-  category: "dashboard",
+  category: "tools",
   refreshCadenceSeconds: 2,
   offlineBehavior: "always-available",
   width: "wide",
@@ -79,7 +79,7 @@ registerPanel({
 registerPanel({
   id: "alerts",
   title: "Active Alerts",
-  category: "dashboard",
+  category: "incident-ops",
   refreshCadenceSeconds: 300,
   offlineBehavior: "degrades",
   height: "tall",
@@ -202,7 +202,7 @@ registerPanel({
 registerPanel({
   id: "space-weather",
   title: "Space Weather",
-  category: "dashboard",
+  category: "activity",
   refreshCadenceSeconds: 1800,
   offlineBehavior: "degrades",
   width: "wide",
