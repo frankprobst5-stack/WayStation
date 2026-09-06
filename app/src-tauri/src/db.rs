@@ -4311,6 +4311,40 @@ const MIGRATIONS: &[&str] = &[
         heard_at     TEXT NOT NULL
     );
     "#,
+    // v47: fix a real crash -- `source_health.via`'s CHECK constraint
+    // was never updated when `Via::Lan` (2026-09-05) or `Via::Aprs`
+    // (2026-09-06) were added, so `report_source_health` calling either
+    // (weather_station.rs's LAN poller, aprs.rs's RF poller) hit a real
+    // `CHECK constraint failed` on every single call, panicked while
+    // holding the shared `db` mutex, poisoned it, and cascaded into
+    // every other background poller panicking too -- one of which
+    // happened to land inside a WebKit C callback that can't unwind,
+    // aborting the whole process. Confirmed live: launching the actual
+    // release binary crashed within seconds with exactly this chain.
+    // SQLite has no `ALTER TABLE ... DROP CONSTRAINT`, so this rebuilds
+    // the table the standard way, preserving every existing row. The
+    // other seven tables sharing this same stale-looking CHECK text
+    // (alerts/space_weather/contests/psk_spots/pota_spots/dx_spots/
+    // satellite_tles) are NOT touched -- checked each of their real
+    // INSERT statements first: every one hardcodes the SQL literal
+    // 'internet', never a bound `Via` parameter, so they can never hit
+    // this failure regardless of how many variants `Via` grows to.
+    // `source_health` is the only table `report_source_health` (and
+    // therefore every integration's own poller) actually writes into.
+    r#"
+    CREATE TABLE source_health_new (
+        source_id       TEXT PRIMARY KEY,
+        label           TEXT NOT NULL,
+        status          TEXT NOT NULL CHECK (status IN ('healthy','degraded','down','unknown')),
+        via             TEXT NOT NULL CHECK (via IN ('internet','mesh','rf','manual','lan','aprs')),
+        last_success_at TEXT,
+        last_attempt_at TEXT,
+        detail          TEXT
+    );
+    INSERT INTO source_health_new SELECT * FROM source_health;
+    DROP TABLE source_health;
+    ALTER TABLE source_health_new RENAME TO source_health;
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -4450,6 +4484,37 @@ mod tests {
         migrate(&mut conn); // must not panic
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, MIGRATIONS.len() as i64);
+    }
+
+    #[test]
+    fn report_source_health_accepts_every_real_via_variant() {
+        // Regression test for a real crash: source_health.via's CHECK
+        // constraint (set once at table creation, migration v1) was never
+        // updated when Via::Lan (2026-09-05) or Via::Aprs (2026-09-06)
+        // were added. Every integration's own background poller calls
+        // report_source_health with whichever Via it was built to report
+        // -- weather_station.rs (Lan) and aprs.rs (Aprs) both hit a real
+        // `CHECK constraint failed` on their very first call, which
+        // panicked while holding the shared db mutex, poisoned it, and
+        // cascaded into every other poller thread panicking too. One of
+        // those landed inside a WebKit C callback that can't unwind,
+        // aborting the whole process -- confirmed live by actually
+        // launching the release binary and watching it crash within
+        // seconds. Fixed by migration v47 (rebuilds source_health with
+        // the full current set). This test exists so the NEXT new Via
+        // variant can't silently reintroduce the same crash: it must be
+        // added here, not just to the enum.
+        let conn = fresh_db();
+        for via in [
+            crate::connectivity::Via::Internet,
+            crate::connectivity::Via::Mesh,
+            crate::connectivity::Via::Rf,
+            crate::connectivity::Via::Manual,
+            crate::connectivity::Via::Lan,
+            crate::connectivity::Via::Aprs,
+        ] {
+            crate::connectivity::report_source_health(&conn, "test-source", "Test Source", crate::connectivity::Status::Healthy, via, None);
+        }
     }
 
     #[test]
