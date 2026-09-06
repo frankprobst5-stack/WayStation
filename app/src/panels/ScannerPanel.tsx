@@ -22,10 +22,12 @@ interface ScannerConfigResponse {
   configured: boolean;
   config?: {
     sources: { center: number; rate: number; gain: number; driver: string; device?: string; ppm?: number }[];
-    systems: { shortName: string; control_channels: number[] }[];
+    systems: { shortName: string; type: string; control_channels?: number[]; squelch?: number }[];
   };
-  talkgroups_csv?: string;
+  csv_data?: string;
 }
+
+type SystemType = "trunked" | "conventional" | "conventionalP25";
 
 type StatusState = { kind: "loading" } | { kind: "ready"; status: ScannerStatus } | { kind: "unreachable"; message: string };
 
@@ -35,6 +37,7 @@ const STATUS_COLORS: Record<string, string> = { no_data: "#888", listening: "#39
 
 function ScannerPanel() {
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
+  const [systemType, setSystemType] = useState<SystemType>("trunked");
   const [shortName, setShortName] = useState("");
   const [driver, setDriver] = useState("osmosdr");
   const [device, setDevice] = useState("rtl=0");
@@ -42,6 +45,7 @@ function ScannerPanel() {
   const [rateMhz, setRateMhz] = useState("8.0");
   const [gain, setGain] = useState("40");
   const [ppm, setPpm] = useState("");
+  const [squelch, setSquelch] = useState("-50");
   const [controlChannelsMhz, setControlChannelsMhz] = useState("");
   const [talkgroupsCsv, setTalkgroupsCsv] = useState("");
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
@@ -70,8 +74,10 @@ function ScannerPanel() {
         setGain(source.gain.toString());
         setPpm(source.ppm !== undefined ? source.ppm.toString() : "");
         setShortName(system.shortName);
-        setControlChannelsMhz(system.control_channels.map((hz) => (hz / 1_000_000).toString()).join(", "));
-        setTalkgroupsCsv(resp.talkgroups_csv ?? "");
+        setSystemType(system.type === "conventional" || system.type === "conventionalP25" ? system.type : "trunked");
+        setControlChannelsMhz((system.control_channels ?? []).map((hz) => (hz / 1_000_000).toString()).join(", "));
+        if (system.squelch !== undefined) setSquelch(system.squelch.toString());
+        setTalkgroupsCsv(resp.csv_data ?? "");
       }
     } catch {
       // Citadel unreachable -- refreshStatus already surfaces that; the
@@ -101,6 +107,7 @@ function ScannerPanel() {
         .map((s) => Math.round(parseFloat(s) * 1_000_000));
       await invoke("save_citadel_scanner_config", {
         request: {
+          system_type: systemType,
           short_name: shortName.trim(),
           driver,
           device: device.trim() || null,
@@ -108,8 +115,9 @@ function ScannerPanel() {
           rate_hz: parseFloat(rateMhz) * 1_000_000,
           gain: parseFloat(gain),
           control_channels_hz: controlChannelsHz,
+          squelch: parseFloat(squelch),
           ppm: ppm.trim() ? parseFloat(ppm) : null,
-          talkgroups_csv: talkgroupsCsv,
+          csv_data: talkgroupsCsv,
         },
       });
       setSaveState({ kind: "done" });
@@ -167,18 +175,26 @@ function ScannerPanel() {
           <h3>Setup</h3>
         </div>
         <p className="field-hint">
-          Trunked systems are local — every county runs different frequencies and talkgroups, so this can't be
-          filled in automatically. You don't need a paid account anywhere: RadioReference's system and talkgroup
-          pages are free to browse and copy by hand (a subscription only adds bulk CSV export and their API), and{" "}
+          Trunked systems (single control channel, many talkgroups) and conventional systems (each channel on its
+          own fixed frequency — typical for county Sheriff/Fire/EMS dispatch) are both real, different shapes;
+          pick the one that matches what you actually have. Local systems are never automatic — every county
+          runs different frequencies. You don't need a paid account anywhere: RadioReference's system and
+          talkgroup pages are free to browse and copy by hand (a subscription only adds bulk CSV export and their
+          API), and{" "}
           <a href="https://digitalfrequencysearch.com/P25" target="_blank" rel="noreferrer">
             digitalfrequencysearch.com
           </a>{" "}
-          gives frequencies straight from FCC license filings with no account at all. Whatever you paste below —
-          hand-typed, downloaded from RadioReference, or shared on OpenMHz — is accepted as long as it has{" "}
-          <code>Decimal</code>, <code>Mode</code>, and <code>Description</code> columns.
+          gives frequencies straight from FCC license filings with no account at all.
         </p>
         {configuredOnCitadel && <div className="sync-result sync-result-ok">A scanner config already exists on Citadel — loaded below.</div>}
         <form className="sync-peer-form" onSubmit={saveConfig} style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <label className="field-hint">System type</label>
+          <select value={systemType} onChange={(e) => setSystemType(e.currentTarget.value as SystemType)}>
+            <option value="trunked">Trunked (P25) — one control channel, many talkgroups</option>
+            <option value="conventional">Conventional — fixed-frequency channels, analog</option>
+            <option value="conventionalP25">Conventional — fixed-frequency channels, P25 digital</option>
+          </select>
+
           <label className="field-hint">System name (short)</label>
           <input value={shortName} onChange={(e) => setShortName(e.currentTarget.value)} placeholder="e.g. cofire" maxLength={6} required />
 
@@ -196,24 +212,52 @@ function ScannerPanel() {
             <input value={ppm} onChange={(e) => setPpm(e.currentTarget.value)} placeholder="ppm" />
           </div>
 
-          <label className="field-hint">Control channel frequencies (MHz, comma-separated)</label>
-          <input
-            value={controlChannelsMhz}
-            onChange={(e) => setControlChannelsMhz(e.currentTarget.value)}
-            placeholder="855.4625, 855.7375"
-            required
-          />
+          {systemType === "trunked" ? (
+            <>
+              <label className="field-hint">Control channel frequencies (MHz, comma-separated)</label>
+              <input
+                value={controlChannelsMhz}
+                onChange={(e) => setControlChannelsMhz(e.currentTarget.value)}
+                placeholder="855.4625, 855.7375"
+                required
+              />
 
-          <label className="field-hint">Talkgroups CSV (paste, or upload a file)</label>
-          <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
-          <textarea
-            value={talkgroupsCsv}
-            onChange={(e) => setTalkgroupsCsv(e.currentTarget.value)}
-            placeholder="Decimal,Mode,Description,Alpha Tag,Priority&#10;101,D,01 Dispatch,DCFD 01 Disp,1"
-            rows={6}
-            style={{ fontFamily: "monospace" }}
-            required
-          />
+              <label className="field-hint">Talkgroups CSV (paste, or upload a file)</label>
+              <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
+              <textarea
+                value={talkgroupsCsv}
+                onChange={(e) => setTalkgroupsCsv(e.currentTarget.value)}
+                placeholder="Decimal,Mode,Description,Alpha Tag,Priority&#10;101,D,01 Dispatch,DCFD 01 Disp,1"
+                rows={6}
+                style={{ fontFamily: "monospace" }}
+                required
+              />
+            </>
+          ) : (
+            <>
+              <label className="field-hint">Squelch (dB)</label>
+              <input value={squelch} onChange={(e) => setSquelch(e.currentTarget.value)} placeholder="-50" required />
+
+              <label className="field-hint">Channel list CSV (paste, or upload a file)</label>
+              <p className="field-hint">
+                <code>TG Number</code> must be the first column (any whole number — these frequencies don't have
+                real talkgroup numbers, just make one up per row) and <code>Frequency</code> is required.{" "}
+                <code>Tone</code> (CTCSS, analog only), <code>Alpha Tag</code>, and <code>Description</code> are
+                optional but make the setup easier to read later.
+              </p>
+              <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
+              <textarea
+                value={talkgroupsCsv}
+                onChange={(e) => setTalkgroupsCsv(e.currentTarget.value)}
+                placeholder={
+                  "TG Number,Frequency,Tone,Alpha Tag,Description\n1,155.7750,114.8,Sheriff Disp,County Sheriff Dispatch"
+                }
+                rows={6}
+                style={{ fontFamily: "monospace" }}
+                required
+              />
+            </>
+          )}
 
           <button type="submit" disabled={saveState.kind === "saving"}>
             {saveState.kind === "saving" ? "Saving…" : "Save to Citadel"}

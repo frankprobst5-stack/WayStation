@@ -90,8 +90,13 @@ pub struct ScannerConfigResponse {
     pub configured: bool,
     #[serde(default)]
     pub config: Option<Value>,
+    /// Whichever CSV the saved config actually uses -- talkgroups (trunked)
+    /// or channel list (conventional/conventionalP25). Renamed from
+    /// `talkgroups_csv` 2026-09-06 when conventional support was added on
+    /// Citadel's side; one generic field is honest about there being two
+    /// real, differently-shaped CSVs behind it, not one.
     #[serde(default)]
-    pub talkgroups_csv: Option<String>,
+    pub csv_data: Option<String>,
 }
 
 /// Reads back whatever is already configured on Citadel, so the setup form
@@ -110,8 +115,19 @@ pub fn get_citadel_scanner_config(db: State<Db>) -> Result<ScannerConfigResponse
         .map_err(|e| format!("Citadel returned something unexpected: {e}"))
 }
 
+/// `system_type` is one of "trunked" (control-channel-following -- the
+/// original and only shape before 2026-09-06), "conventional" (fixed-
+/// frequency analog), or "conventionalP25" (fixed-frequency P25) -- added
+/// when Frank brought real conventional Sheriff/Fire/EMS frequencies
+/// (PANCOM, Donley County) the trunked-only shape couldn't express at
+/// all. `control_channels_hz` only matters for "trunked"; `squelch` only
+/// matters for the two conventional types (trunked systems default their
+/// own squelch on Citadel's side). Both are sent regardless of type
+/// rather than making the request shape conditional -- Citadel's route
+/// already ignores whichever field doesn't apply to the chosen type.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScannerConfigRequest {
+    pub system_type: String,
     pub short_name: String,
     pub driver: String,
     pub device: Option<String>,
@@ -119,8 +135,9 @@ pub struct ScannerConfigRequest {
     pub rate_hz: f64,
     pub gain: f64,
     pub control_channels_hz: Vec<i64>,
+    pub squelch: f64,
     pub ppm: Option<f64>,
-    pub talkgroups_csv: String,
+    pub csv_data: String,
 }
 
 /// Sends a new setup to Citadel, which validates the whole thing (a
@@ -179,6 +196,7 @@ mod tests {
         let before: ScannerConfigResponse = client().get(format!("{base}/api/scanner/config")).send().unwrap().json().unwrap();
 
         let request = ScannerConfigRequest {
+            system_type: "trunked".to_string(),
             short_name: "test".to_string(),
             driver: "osmosdr".to_string(),
             device: Some("rtl=0".to_string()),
@@ -186,8 +204,9 @@ mod tests {
             rate_hz: 8_000_000.0,
             gain: 40.0,
             control_channels_hz: vec![855_462_500],
+            squelch: -50.0,
             ppm: None,
-            talkgroups_csv: "Decimal,Mode,Description\n101,D,Test Talkgroup\n".to_string(),
+            csv_data: "Decimal,Mode,Description\n101,D,Test Talkgroup\n".to_string(),
         };
         let post_resp = client().post(format!("{base}/api/scanner/config")).json(&request).send().unwrap();
         assert!(post_resp.status().is_success(), "a well-formed config must be accepted");
@@ -201,6 +220,44 @@ mod tests {
         if !before.configured {
             let _ = std::fs::remove_file("/home/frank/citadel/appdata/media-vault/scanner/config.json");
             let _ = std::fs::remove_file("/home/frank/citadel/appdata/media-vault/scanner/talkgroups.csv");
+        }
+    }
+
+    /// Live-only, same discipline as the trunked round trip above --
+    /// proves the conventional-system path (added 2026-09-06 for real
+    /// PANCOM/Donley County frequencies) actually round-trips against the
+    /// real running Citadel instance, not just Citadel's own Python tests.
+    #[test]
+    #[ignore]
+    fn real_conventional_round_trip_against_a_live_citadel_instance() {
+        let base = "http://127.0.0.1:8085";
+        let before: ScannerConfigResponse = client().get(format!("{base}/api/scanner/config")).send().unwrap().json().unwrap();
+
+        let request = ScannerConfigRequest {
+            system_type: "conventionalP25".to_string(),
+            short_name: "test".to_string(),
+            driver: "osmosdr".to_string(),
+            device: Some("rtl=0".to_string()),
+            center_hz: 155_000_000.0,
+            rate_hz: 2_400_000.0,
+            gain: 40.0,
+            control_channels_hz: vec![],
+            squelch: -60.0,
+            ppm: None,
+            csv_data: "TG Number,Frequency,Tone,Alpha Tag,Description\n1,154.3475,,Sheriff E,Sheriff Repeater East PANCOM\n".to_string(),
+        };
+        let post_resp = client().post(format!("{base}/api/scanner/config")).json(&request).send().unwrap();
+        assert!(post_resp.status().is_success(), "a well-formed conventional config must be accepted");
+
+        let after: ScannerConfigResponse = client().get(format!("{base}/api/scanner/config")).send().unwrap().json().unwrap();
+        assert!(after.configured);
+        assert_eq!(after.config.as_ref().unwrap()["systems"][0]["type"], "conventionalP25");
+        assert_eq!(after.config.unwrap()["systems"][0]["channelFile"], "channels.csv");
+        assert!(after.csv_data.unwrap().contains("Sheriff Repeater East PANCOM"));
+
+        if !before.configured {
+            let _ = std::fs::remove_file("/home/frank/citadel/appdata/media-vault/scanner/config.json");
+            let _ = std::fs::remove_file("/home/frank/citadel/appdata/media-vault/scanner/channels.csv");
         }
     }
 }
