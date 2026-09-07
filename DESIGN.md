@@ -34,6 +34,7 @@ The two products should share typography, card geometry, status semantics, and i
 - Show active modules subtly; elevate modules needing attention. A stale backup, failed map service, low storage, or unavailable WayStation service should be visible immediately.
 - Keep the cockpit scratchpad — useful for quick mission notes, frequencies, coordinates, hand-off markers, and local reference information.
 - Preferred naming: **Project Citadel - Command & Control Station.**
+- **Education hub, added 2026-09-07:** the "Home Education Hub" tile should link out to [Cloud9](https://github.com/frankprobst5-stack/Cloud9) (a real, already-built homeschool desktop dashboard — Flask app, local AI assistant, dictionary, weather, planner, journal, video shelf, same card-grid layout as Citadel's own front page) rather than pointing straight at Kolibri as it does today. Kolibri itself drops down a level — it becomes just one more card inside Cloud9's own dashboard, alongside Cloud9's existing Dictionary/Journal/Video Shelf/etc. cards, rather than a standalone Citadel-level module in its own right.
 
 ## WayStation — overall direction
 
