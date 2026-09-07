@@ -1358,6 +1358,20 @@ pub fn get_incident_events(db: State<Db>, incident_id: String) -> Vec<IncidentEv
     get_incident_events_conn(&conn, &incident_id)
 }
 
+/// Logs a real Whisper-transcribed scanner recording onto an incident's
+/// timeline -- the operator picks which incident, same as every other
+/// explicit-tagging flow in this app (no automatic "current incident"
+/// concept exists anywhere else either, see `set_message_incident`/
+/// `set_marker_incident`). `transcription.rs` owns talking to Citadel's
+/// real whisper-server and getting real text back; this command is only
+/// called once that real text already exists, never with a guess.
+#[tauri::command]
+pub fn log_transcript_to_incident(db: State<Db>, incident_id: String, filename: String, text: String) {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let summary = format!("Scanner transcript ({filename}): {text}");
+    record_incident_event(&conn, &incident_id, "scanner_transcript_logged", Some("scanner_recording"), Some(&filename), &summary);
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Sitrep {
     pub id: i64,

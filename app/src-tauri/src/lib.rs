@@ -29,6 +29,7 @@ mod satellite;
 mod space_weather;
 mod sync;
 mod system_health;
+mod transcription;
 mod transport;
 mod weather_station;
 
@@ -185,6 +186,7 @@ pub fn run() {
             db::set_resource_request_incident,
             db::set_resource_request_location,
             db::get_incident_events,
+            db::log_transcript_to_incident,
             db::create_sitrep,
             db::get_sitreps,
             db::get_alerts,
@@ -260,6 +262,8 @@ pub fn run() {
             direwolf::start_direwolf,
             direwolf::stop_direwolf,
             aprs::get_aprs_stations,
+            transcription::get_scanner_recordings,
+            transcription::transcribe_recording,
             js8call::get_js8call_status,
             js8call::get_js8call_inbox,
             repeaterbook::search_repeaters,

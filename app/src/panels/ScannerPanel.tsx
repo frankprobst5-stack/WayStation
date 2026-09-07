@@ -63,6 +63,26 @@ interface ScannerStatus {
   decode_rates: ScannerDecodeRate[];
 }
 
+// Mirrors transcription::ScannerRecording.
+interface ScannerRecording {
+  filename: string;
+  size_bytes: number;
+  modified_at: number;
+}
+
+// Mirrors db::Incident, trimmed to the fields this panel actually uses.
+interface IncidentSummary {
+  uuid: string;
+  name: string;
+  status: "active" | "closed";
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // Mirrors citadel_scanner::ScannerConfigResponse.
 interface ScannerConfigResponse {
   configured: boolean;
@@ -105,6 +125,58 @@ function ScannerPanel() {
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
   const [configuredOnCitadel, setConfiguredOnCitadel] = useState(false);
 
+  const [recordings, setRecordings] = useState<ScannerRecording[]>([]);
+  const [recordingsError, setRecordingsError] = useState<string | null>(null);
+  const [transcribing, setTranscribing] = useState<string | null>(null);
+  const [transcripts, setTranscripts] = useState<Record<string, string>>({});
+  const [transcribeErrors, setTranscribeErrors] = useState<Record<string, string>>({});
+  const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
+  const [incidentPicks, setIncidentPicks] = useState<Record<string, string>>({});
+  const [loggedFilenames, setLoggedFilenames] = useState<Set<string>>(new Set());
+
+  async function refreshRecordings() {
+    try {
+      setRecordings(await invoke<ScannerRecording[]>("get_scanner_recordings"));
+      setRecordingsError(null);
+    } catch (err) {
+      setRecordingsError(String(err));
+    }
+  }
+
+  async function loadIncidents() {
+    try {
+      setIncidents(await invoke<IncidentSummary[]>("get_incidents"));
+    } catch {
+      // Recordings still list/transcribe fine without this -- it only
+      // disables the "log to incident timeline" step below.
+    }
+  }
+
+  async function transcribe(filename: string) {
+    setTranscribing(filename);
+    try {
+      const text = await invoke<string>("transcribe_recording", { filename });
+      setTranscripts((prev) => ({ ...prev, [filename]: text }));
+      setTranscribeErrors((prev) => {
+        const next = { ...prev };
+        delete next[filename];
+        return next;
+      });
+    } catch (err) {
+      setTranscribeErrors((prev) => ({ ...prev, [filename]: String(err) }));
+    } finally {
+      setTranscribing(null);
+    }
+  }
+
+  async function logToIncident(filename: string) {
+    const incidentId = incidentPicks[filename];
+    const text = transcripts[filename];
+    if (!incidentId || !text) return;
+    await invoke("log_transcript_to_incident", { incidentId, filename, text });
+    setLoggedFilenames((prev) => new Set(prev).add(filename));
+  }
+
   async function refreshStatus() {
     try {
       const status = await invoke<ScannerStatus>("get_citadel_scanner_status");
@@ -142,6 +214,8 @@ function ScannerPanel() {
   useEffect(() => {
     refreshStatus();
     loadExistingConfig();
+    refreshRecordings();
+    loadIncidents();
   }, []);
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -381,6 +455,85 @@ function ScannerPanel() {
           )}
         </>
       )}
+
+      <div className="scan-section">
+        <div className="scan-section-head">
+          <h3>Recordings</h3>
+        </div>
+        <p className="scan-hint">
+          Real call audio trunk-recorder has captured, transcribed on Citadel by a real local Whisper.cpp
+          model — nothing leaves this network. Empty until a real RTL-SDR dongle has actually captured
+          something.
+        </p>
+        {recordingsError && <div className="scan-result scan-result-error">Could not reach Citadel: {recordingsError}</div>}
+        {!recordingsError && recordings.length === 0 && <div className="scan-empty">No recordings captured yet.</div>}
+        {recordings.length > 0 && (
+          <div className="scan-table-wrap">
+            <table className="scan-table">
+              <thead>
+                <tr>
+                  <th>Filename</th>
+                  <th>Size</th>
+                  <th>Captured</th>
+                  <th>Transcript</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recordings.map((r) => {
+                  const activeIncidents = incidents.filter((i) => i.status === "active");
+                  return (
+                    <tr key={r.filename}>
+                      <td className="mono">{r.filename}</td>
+                      <td className="mono">{formatBytes(r.size_bytes)}</td>
+                      <td className="mono">{new Date(r.modified_at * 1000).toLocaleString()}</td>
+                      <td>
+                        {transcripts[r.filename] ? (
+                          <div>
+                            <div>{transcripts[r.filename]}</div>
+                            {loggedFilenames.has(r.filename) ? (
+                              <span className="scan-hint">Logged to timeline.</span>
+                            ) : (
+                              activeIncidents.length > 0 && (
+                                <div className="scan-form-row" style={{ marginTop: "0.3rem" }}>
+                                  <select
+                                    value={incidentPicks[r.filename] ?? ""}
+                                    onChange={(e) => setIncidentPicks((prev) => ({ ...prev, [r.filename]: e.currentTarget.value }))}
+                                  >
+                                    <option value="">Log to incident…</option>
+                                    {activeIncidents.map((i) => (
+                                      <option key={i.uuid} value={i.uuid}>
+                                        {i.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button type="button" onClick={() => logToIncident(r.filename)} disabled={!incidentPicks[r.filename]}>
+                                    Log
+                                  </button>
+                                </div>
+                              )
+                            )}
+                          </div>
+                        ) : transcribeErrors[r.filename] ? (
+                          <div>
+                            <span className="scan-emergency">{transcribeErrors[r.filename]}</span>{" "}
+                            <button type="button" onClick={() => transcribe(r.filename)} disabled={transcribing === r.filename}>
+                              Retry
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => transcribe(r.filename)} disabled={transcribing === r.filename}>
+                            {transcribing === r.filename ? "Transcribing…" : "Transcribe"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="scan-section">
         <div className="scan-section-head">
