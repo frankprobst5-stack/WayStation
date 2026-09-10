@@ -604,6 +604,115 @@ body {
   font-style: italic;
 }
 
+/* Generic panel tab bar -- introduced for Weather, reusable by any other
+   panel DESIGN.md calls for tabs on (Reference, Tools, Settings, ...). */
+.panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+
+.panel-tab-btn {
+  padding: 0.4em 0.9rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.panel-tab-btn:hover {
+  opacity: 1;
+}
+
+.panel-tab-btn.active {
+  background: var(--surface-4);
+  border-color: var(--border-strong);
+  opacity: 1;
+  font-weight: 600;
+}
+
+.weather-link-btn {
+  padding: 0.4em 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.weather-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.weather-day-strip {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.weather-day-card {
+  flex: 1 0 70px;
+  min-width: 70px;
+  text-align: center;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.4rem;
+}
+
+.weather-day-label {
+  font-size: 0.72rem;
+  opacity: 0.75;
+  margin-bottom: 0.3rem;
+}
+
+.weather-day-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.weather-day-icon-fallback {
+  font-size: 1.4rem;
+  opacity: 0.5;
+}
+
+.weather-day-temps {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+
+.weather-day-high {
+  font-weight: 600;
+}
+
+.weather-day-low {
+  opacity: 0.6;
+}
+
+.weather-day-precip {
+  font-size: 0.68rem;
+  opacity: 0.7;
+  margin-top: 0.2rem;
+}
+
+.weather-radar-canvas {
+  height: 420px;
+}
+
 .marker-form {
   display: flex;
   flex-wrap: wrap;

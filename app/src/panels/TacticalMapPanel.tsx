@@ -3,8 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Protocol, PMTiles } from "pmtiles";
-import { namedTheme, layers as protomapsLayers } from "protomaps-themes-base";
 import { gridSquareToLatLon } from "../lib/maidenhead";
 import {
   type LatLon,
@@ -15,24 +13,11 @@ import {
   sampleAlongPath,
 } from "../lib/geoMeasure";
 import { downloadTextFile, markersToGpx, markersToKml } from "../lib/markerExport";
-
-// Real primary path: Citadel's own already-running nginx serving
-// comms_base.pmtiles/tactical_terrain.pmtiles over plain HTTP range
-// requests, matching Citadel's own verified-working Tactical Map exactly
-// (same protomaps-themes-base styling, same 'dark' theme). Decided
-// 2026-08-31 -- the whole family/group runs Citadel, so this is the real
-// path, not a nice-to-have.
-//
-// OpenFreeMap stays as the fallback for anyone running WayStation
-// standalone without Citadel: genuinely free, no API key, no rate limit,
-// MIT-licensed and self-hostable if terms ever change -- checked directly
-// before using, same discipline as WebSDR/RepeaterBook/POTA elsewhere in
-// this project.
-const ONLINE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+import { ONLINE_STYLE, citadelBase, citadelStyle, probeReachable } from "../lib/citadelMapStyle";
+import { RADAR_LAYER_ID, RADAR_SOURCE_ID, fetchLatestRadarTileTemplate } from "../lib/radar";
 
 const DEFAULT_CENTER: [number, number] = [-98.5, 39.8]; // CONUS center, until the station's own grid re-centers it
 const DEFAULT_ZOOM = 4;
-const CITADEL_PROBE_TIMEOUT_MS = 2000;
 
 interface MeshNode {
   node_num: number;
@@ -164,108 +149,6 @@ function markerStatusText(m: MapMarker): string {
   if (m.received_via) return `received via ${m.received_via}`;
   if (m.dispatch_status === "dispatched") return `sent via ${m.dispatched_via}`;
   return "queued — no transport reached yet";
-}
-
-function citadelBase(host: string | null): string {
-  const h = (host || "127.0.0.1:8085").trim();
-  return `http://${h}`;
-}
-
-let sharedProtocol: Protocol | null = null;
-function ensurePmtilesProtocol(): Protocol {
-  if (!sharedProtocol) {
-    sharedProtocol = new Protocol();
-    maplibregl.addProtocol("pmtiles", sharedProtocol.tile);
-  }
-  return sharedProtocol;
-}
-
-/** Mirrors Citadel's own map.html (background + hillshade + base layers,
- * 'dark' theme) rather than inventing a second styling approach. One
- * tradeoff carried over unchanged from Citadel: label glyphs still come
- * from a hosted URL, so text labels specifically need internet even in
- * this "local" mode -- roads/terrain/water don't.
- *
- * The terrain/hillshade file is treated as optional, not assumed present
- * -- comms_base.pmtiles (roads/labels) is the one thing citadelReachable()
- * actually checks for, and standalone users following the manual's tile
- * instructions may reasonably only bother downloading that one. Silently
- * requiring a second file that isn't there would mean a MapLibre source
- * error firing on load for something that was never promised to exist. */
-async function citadelStyle(base: string): Promise<{ style: maplibregl.StyleSpecification; hasTerrain: boolean }> {
-  const protocol = ensurePmtilesProtocol();
-  const basemapUrl = `${base}/tiles/comms_base.pmtiles`;
-  const terrainUrl = `${base}/tiles/tactical_terrain.pmtiles`;
-  protocol.add(new PMTiles(basemapUrl));
-
-  const theme = namedTheme("dark");
-  const baseLayers = protomapsLayers("basemap", theme, { lang: "en" });
-  const hasTerrain = await probeReachable(terrainUrl);
-
-  const sources: maplibregl.StyleSpecification["sources"] = {
-    basemap: {
-      type: "vector",
-      url: `pmtiles://${basemapUrl}`,
-      attribution: '© <a href="https://openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
-    },
-  };
-  const layers: maplibregl.LayerSpecification[] = [{ id: "bg", type: "background", paint: { "background-color": theme.background } }];
-
-  if (hasTerrain) {
-    protocol.add(new PMTiles(terrainUrl));
-    sources.terrain = { type: "raster-dem", url: `pmtiles://${terrainUrl}`, encoding: "terrarium", tileSize: 256 };
-    layers.push({
-      id: "hillshade",
-      type: "hillshade",
-      source: "terrain",
-      paint: { "hillshade-shadow-color": "#0a0e07", "hillshade-highlight-color": "#3a4a2a", "hillshade-exaggeration": 0.6 },
-    });
-  }
-
-  return {
-    style: {
-      version: 8,
-      glyphs: "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
-      sources,
-      layers: [...layers, ...baseLayers],
-    },
-    hasTerrain,
-  };
-}
-
-async function probeReachable(url: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CITADEL_PROBE_TIMEOUT_MS);
-    const resp = await fetch(url, { method: "HEAD", signal: controller.signal });
-    clearTimeout(timeout);
-    return resp.ok;
-  } catch {
-    return false;
-  }
-}
-
-const RADAR_SOURCE_ID = "rainviewer-radar";
-const RADAR_LAYER_ID = "rainviewer-radar-layer";
-
-/** RainViewer's public tile API -- free, no key, verified live before
- * building this (a plain fetch against api.rainviewer.com). Returns the
- * most recent radar frame's tile URL template, or null if RainViewer is
- * unreachable or the response shape ever changes -- this is a pure
- * enhancement layer, never something the rest of the map should break
- * over. */
-async function fetchLatestRadarTileTemplate(): Promise<string | null> {
-  try {
-    const resp = await fetch("https://api.rainviewer.com/public/weather-maps.json");
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const frames = data?.radar?.past;
-    if (!Array.isArray(frames) || frames.length === 0) return null;
-    const latest = frames[frames.length - 1];
-    return `${data.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`;
-  } catch {
-    return null;
-  }
 }
 
 function TacticalMapPanel() {
