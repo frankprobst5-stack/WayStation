@@ -200,6 +200,7 @@ pub fn run() {
             dispatch::dispatch_message,
             db::get_markers,
             db::create_marker,
+            db::delete_marker,
             dispatch::dispatch_marker,
             db::get_delivery_attempts,
             sync::export_manifest_to_file,

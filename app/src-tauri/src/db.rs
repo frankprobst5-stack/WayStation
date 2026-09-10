@@ -1944,10 +1944,13 @@ pub struct MapMarker {
     pub incident_id: Option<String>,
     pub expires_at: Option<String>,
     pub trust_state: String,
+    /// Set by `delete_marker` -- a tombstone, not a removed row. See the
+    /// v48 migration comment for why a plain DELETE can't be used here.
+    pub deleted_at: Option<String>,
 }
 
 const MARKER_COLUMNS: &str =
-    "id, label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via, uuid, revision, updated_at, incident_id, expires_at, trust_state";
+    "id, label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via, uuid, revision, updated_at, incident_id, expires_at, trust_state, deleted_at";
 
 fn marker_from_row(row: &rusqlite::Row) -> rusqlite::Result<MapMarker> {
     Ok(MapMarker {
@@ -1969,10 +1972,16 @@ fn marker_from_row(row: &rusqlite::Row) -> rusqlite::Result<MapMarker> {
         incident_id: row.get(15)?,
         expires_at: row.get(16)?,
         trust_state: row.get(17)?,
+        deleted_at: row.get(18)?,
     })
 }
 
 /// Plain-`&Connection` form -- same reasoning as `get_messages_conn`.
+/// Deliberately includes tombstoned rows: sync's `export_manifest` needs
+/// to keep advertising a deleted marker's manifest entry (bumped
+/// revision, `deleted_at` set) so a peer that hasn't seen the delete yet
+/// still fetches and adopts it. `get_markers` below is what filters
+/// tombstones out of what the map itself actually renders.
 pub fn get_markers_conn(conn: &Connection) -> Vec<MapMarker> {
     let mut stmt = conn
         .prepare(&format!("SELECT {MARKER_COLUMNS} FROM map_markers ORDER BY created_at DESC"))
@@ -1986,7 +1995,24 @@ pub fn get_markers_conn(conn: &Connection) -> Vec<MapMarker> {
 #[tauri::command]
 pub fn get_markers(db: State<Db>) -> Vec<MapMarker> {
     let conn = db.0.lock().expect("db mutex poisoned");
-    get_markers_conn(&conn)
+    get_markers_conn(&conn).into_iter().filter(|m| m.deleted_at.is_none()).collect()
+}
+
+/// Soft-delete: sets `deleted_at` and bumps `revision`/`updated_at` so
+/// the removal itself propagates through the same manifest/revision
+/// sync as any other marker edit, rather than a plain SQL DELETE that
+/// sync would have no way to see or forward to peers. See the v48
+/// migration comment.
+#[tauri::command]
+pub fn delete_marker(db: State<Db>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE map_markers SET deleted_at = ?1, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
+        params![now, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Used by the dispatcher to re-fetch a single marker after an update.
@@ -2100,27 +2126,30 @@ pub fn insert_received_marker(
 /// why `trust_state` is forced rather than trusted from the wire.
 pub fn insert_synced_marker(conn: &Connection, m: &MapMarker) {
     conn.execute(
-        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via, uuid, revision, updated_at, incident_id, expires_at, trust_state)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'received')",
+        "INSERT INTO map_markers (label, marker_type, latitude, longitude, origin_station, to_station, created_at, content_hash, dispatch_status, dispatched_via, received_via, uuid, revision, updated_at, incident_id, expires_at, trust_state, deleted_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'received', ?17)",
         params![
             m.label, m.marker_type, m.latitude, m.longitude, m.origin_station, m.to_station, m.created_at, m.content_hash,
-            m.dispatch_status, m.dispatched_via, m.received_via, m.uuid, m.revision, m.updated_at, m.incident_id, m.expires_at
+            m.dispatch_status, m.dispatched_via, m.received_via, m.uuid, m.revision, m.updated_at, m.incident_id, m.expires_at,
+            m.deleted_at
         ],
     )
     .expect("failed to insert synced marker");
 }
 
 /// Overwrites an existing marker (matched by uuid) with a newer
-/// revision that arrived via sync.
+/// revision that arrived via sync. Carries `deleted_at` too -- this is
+/// the path a tombstone from another station actually arrives through,
+/// same as any other marker edit (see the v48 migration comment).
 pub fn update_synced_marker(conn: &Connection, m: &MapMarker) {
     conn.execute(
         "UPDATE map_markers SET label = ?1, marker_type = ?2, latitude = ?3, longitude = ?4, origin_station = ?5, to_station = ?6,
          content_hash = ?7, dispatch_status = ?8, dispatched_via = ?9, received_via = ?10, revision = ?11, updated_at = ?12,
-         incident_id = ?13, expires_at = ?14, trust_state = 'received'
-         WHERE uuid = ?15",
+         incident_id = ?13, expires_at = ?14, trust_state = 'received', deleted_at = ?15
+         WHERE uuid = ?16",
         params![
             m.label, m.marker_type, m.latitude, m.longitude, m.origin_station, m.to_station, m.content_hash, m.dispatch_status,
-            m.dispatched_via, m.received_via, m.revision, m.updated_at, m.incident_id, m.expires_at, m.uuid
+            m.dispatched_via, m.received_via, m.revision, m.updated_at, m.incident_id, m.expires_at, m.deleted_at, m.uuid
         ],
     )
     .expect("failed to update synced marker");
@@ -4358,6 +4387,22 @@ const MIGRATIONS: &[&str] = &[
     INSERT INTO source_health_new SELECT * FROM source_health;
     DROP TABLE source_health;
     ALTER TABLE source_health_new RENAME TO source_health;
+    "#,
+    // v48: soft-delete for map markers, decided 2026-09-10 -- removing a
+    // pin has to go through the same manifest/revision sync every other
+    // marker edit does, or a station that deletes a pin locally would
+    // see it silently reappear the next time it syncs with a peer who
+    // never got the delete. A hard DELETE has no revision to propagate
+    // and no row left for a peer's manifest comparison to even find, so
+    // this is a tombstone column instead: `delete_marker` bumps
+    // `revision`/`updated_at` and sets `deleted_at`, which flows through
+    // `export_manifest`/`merge_incoming` exactly like a label edit would.
+    // `get_markers_conn` (shared by the map UI and by sync's manifest
+    // export) deliberately keeps returning tombstoned rows -- only the
+    // `get_markers` Tauri command filters them out, so sync still sees
+    // and propagates the deletion after the pin's gone from the map.
+    r#"
+    ALTER TABLE map_markers ADD COLUMN deleted_at TEXT;
     "#,
 ];
 

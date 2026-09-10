@@ -536,6 +536,22 @@ body {
   border-color: transparent;
 }
 
+.tactical-map-popup-remove {
+  margin-top: 0.4rem;
+  padding: 0.25em 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.tactical-map-popup-remove:hover {
+  border-color: #e64d4d;
+  color: #e64d4d;
+}
+
 .marker-form {
   display: flex;
   flex-wrap: wrap;

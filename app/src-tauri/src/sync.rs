@@ -503,6 +503,7 @@ mod tests {
             incident_id: None,
             expires_at: None,
             trust_state: "local".to_string(),
+            deleted_at: None,
         }
     }
 

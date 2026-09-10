@@ -357,11 +357,29 @@ function TacticalMapPanel() {
       invoke<AprsStation[]>("get_aprs_stations"),
     ]);
 
-    const addPin = (lat: number, lon: number, color: string, label: string) => {
-      const marker = new maplibregl.Marker({ color })
-        .setLngLat([lon, lat])
-        .setPopup(new maplibregl.Popup({ offset: 16 }).setText(label))
-        .addTo(map);
+    // `onRemove` is only passed for actual map_markers rows (the pins an
+    // operator drops) -- mesh nodes, roster check-ins, resources,
+    // personnel, resource requests, aircraft, and APRS stations are live
+    // telemetry views with nothing to "delete," so their pins keep the
+    // plain text-only popup.
+    const addPin = (lat: number, lon: number, color: string, label: string, onRemove?: () => void) => {
+      let popup: maplibregl.Popup;
+      if (onRemove) {
+        const content = document.createElement("div");
+        const text = document.createElement("div");
+        text.textContent = label;
+        content.appendChild(text);
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "tactical-map-popup-remove";
+        removeBtn.textContent = "Remove pin";
+        removeBtn.onclick = onRemove;
+        content.appendChild(removeBtn);
+        popup = new maplibregl.Popup({ offset: 16 }).setDOMContent(content);
+      } else {
+        popup = new maplibregl.Popup({ offset: 16 }).setText(label);
+      }
+      const marker = new maplibregl.Marker({ color }).setLngLat([lon, lat]).setPopup(popup).addTo(map);
       markersRef.current.push(marker);
     };
 
@@ -416,7 +434,10 @@ function TacticalMapPanel() {
       if (!matchesIncident(p.incident_id)) continue;
       const color = MARKER_COLORS[p.marker_type] || MARKER_COLORS.info;
       const from = p.origin_station ? ` — ${p.origin_station}` : "";
-      addPin(p.latitude, p.longitude, color, `${p.label}${from} (${markerStatusText(p)})`);
+      addPin(p.latitude, p.longitude, color, `${p.label}${from} (${markerStatusText(p)})`, async () => {
+        await invoke("delete_marker", { id: p.id });
+        refreshPins();
+      });
     }
     for (const person of personnel) {
       if (person.latitude === null || person.longitude === null) continue;
