@@ -371,6 +371,7 @@ registerPanel({
   category: "flight-tracking",
   refreshCadenceSeconds: 5 * 60,
   offlineBehavior: "internet-only",
+  width: "full",
   height: "tall",
   component: FlightTrackingPanel,
 });
@@ -392,7 +393,8 @@ registerPanel({
   category: "weather",
   refreshCadenceSeconds: 5 * 60,
   offlineBehavior: "internet-only",
-  height: "tall",
+  width: "full",
+  height: "natural",
   component: WeatherPanel,
 });
 
