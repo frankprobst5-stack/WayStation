@@ -16,7 +16,7 @@ import ReadinessPanel from "./ReadinessPanel";
 import WinlinkPanel from "./WinlinkPanel";
 import Js8CallPanel from "./Js8CallPanel";
 import PacketPanel from "./PacketPanel";
-import SpaceWeatherPanel from "./SpaceWeatherPanel";
+import ActivityPanel from "./ActivityPanel";
 import SpectrumReferencePanel from "./SpectrumReferencePanel";
 import ChannelDirectoryPanel from "./ChannelDirectoryPanel";
 import BearingDistancePanel from "./BearingDistancePanel";
@@ -28,20 +28,16 @@ import RfSafetyPanel from "./RfSafetyPanel";
 import RepeaterLookupPanel from "./RepeaterLookupPanel";
 import WebSdrPanel from "./WebSdrPanel";
 import ContestCalendarPanel from "./ContestCalendarPanel";
-import PskReporterPanel from "./PskReporterPanel";
-import PotaPanel from "./PotaPanel";
+import DxClusterPanel from "./DxClusterPanel";
 import FlightTrackingPanel from "./FlightTrackingPanel";
 import ScannerPanel from "./ScannerPanel";
 import WeatherPanel from "./WeatherPanel";
-import DxClusterPanel from "./DxClusterPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
 import FieldReferencePanel from "./FieldReferencePanel";
 import RigControlPanel from "./RigControlPanel";
 import RotatorControlPanel from "./RotatorControlPanel";
 import UserManualPanel from "./UserManualPanel";
-import SatellitePanel from "./SatellitePanel";
-import QsoLogPanel from "./QsoLogPanel";
 import MeshPanel from "./MeshPanel";
 import SyncPanel from "./SyncPanel";
 
@@ -210,15 +206,20 @@ registerPanel({
   component: PacketPanel,
 });
 
+// Consolidates what used to be seven separately-registered panels (Space
+// Weather, POTA Spots, Satellite Passes, Reception Reports, DX Cluster,
+// Contest Calendar, QSO Log) into one tabbed page -- see ActivityPanel.tsx.
+// Each real panel component is still used unchanged, just given a shared
+// home instead of stacking as separate tiles under this same category.
 registerPanel({
-  id: "space-weather",
-  title: "Space Weather",
+  id: "activity",
+  title: "Activity",
   category: "activity",
-  refreshCadenceSeconds: 1800,
+  refreshCadenceSeconds: null,
   offlineBehavior: "degrades",
-  width: "wide",
+  width: "full",
   height: "natural",
-  component: SpaceWeatherPanel,
+  component: ActivityPanel,
 });
 
 registerPanel({
@@ -334,6 +335,13 @@ registerPanel({
   component: FieldReferencePanel,
 });
 
+// Kept as separate, hobbyist-flagged registrations (not folded into
+// ActivityPanel's tabs) specifically so Tactical Mode's existing
+// `panels.filter(p => !p.hobbyist)` still hides them -- folding these into
+// an internal tab would have made them inescapable even in Tactical Mode,
+// since that filter only ever runs at the top-level registry, not inside
+// a panel's own tab switcher. Also matches the actual mockup, which never
+// listed DX Cluster or Contest Calendar as Activity tabs to begin with.
 registerPanel({
   id: "contest-calendar",
   title: "Contest Calendar",
@@ -346,23 +354,14 @@ registerPanel({
 });
 
 registerPanel({
-  id: "pskreporter",
-  title: "Reception Reports (PSKReporter)",
+  id: "dx-cluster",
+  title: "DX Cluster",
   category: "activity",
-  refreshCadenceSeconds: 20 * 60,
+  refreshCadenceSeconds: null,
   offlineBehavior: "internet-only",
   height: "tall",
-  component: PskReporterPanel,
-});
-
-registerPanel({
-  id: "pota-spots",
-  title: "POTA Activator Spots",
-  category: "activity",
-  refreshCadenceSeconds: 5 * 60,
-  offlineBehavior: "internet-only",
-  height: "tall",
-  component: PotaPanel,
+  hobbyist: true,
+  component: DxClusterPanel,
 });
 
 registerPanel({
@@ -398,38 +397,6 @@ registerPanel({
   component: WeatherPanel,
 });
 
-registerPanel({
-  id: "dx-cluster",
-  title: "DX Cluster",
-  category: "activity",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "internet-only",
-  height: "tall",
-  hobbyist: true,
-  component: DxClusterPanel,
-});
-
-registerPanel({
-  id: "satellites",
-  title: "Satellite Passes",
-  category: "activity",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "internet-only",
-  width: "full",
-  height: "natural",
-  component: SatellitePanel,
-});
-
-registerPanel({
-  id: "qso-log",
-  title: "QSO Log",
-  category: "activity",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "full",
-  height: "natural",
-  component: QsoLogPanel,
-});
 
 registerPanel({
   id: "mesh",
