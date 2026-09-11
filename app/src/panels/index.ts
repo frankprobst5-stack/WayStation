@@ -9,12 +9,8 @@ import TacticalMapPanel from "./TacticalMapPanel";
 import ActivityPanel from "./ActivityPanel";
 import SpectrumReferencePanel from "./SpectrumReferencePanel";
 import ChannelDirectoryPanel from "./ChannelDirectoryPanel";
-import BearingDistancePanel from "./BearingDistancePanel";
 import BandPlanPanel from "./BandPlanPanel";
-import AntennaCalculatorPanel from "./AntennaCalculatorPanel";
-import DecibelCalculatorPanel from "./DecibelCalculatorPanel";
-import SwrCalculatorPanel from "./SwrCalculatorPanel";
-import RfSafetyPanel from "./RfSafetyPanel";
+import ToolsPanel from "./ToolsPanel";
 import RepeaterLookupPanel from "./RepeaterLookupPanel";
 import WebSdrPanel from "./WebSdrPanel";
 import ContestCalendarPanel from "./ContestCalendarPanel";
@@ -25,8 +21,6 @@ import WeatherPanel from "./WeatherPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
 import FieldReferencePanel from "./FieldReferencePanel";
-import RigControlPanel from "./RigControlPanel";
-import RotatorControlPanel from "./RotatorControlPanel";
 import UserManualPanel from "./UserManualPanel";
 import SyncPanel from "./SyncPanel";
 
@@ -41,26 +35,19 @@ registerPanel({
   component: WorldMapPanel,
 });
 
+// Consolidates seven panels that used to each register separately (Rig
+// Control, Rotator Control, Bearing & Distance, Antenna Length, dB, SWR/
+// Impedance, and RF Power Density further below) into one tabbed page --
+// see ToolsPanel.tsx. Every real panel component is reused unchanged.
 registerPanel({
-  id: "rig-control",
-  title: "Rig Control",
+  id: "tools",
+  title: "Tools",
   category: "tools",
-  refreshCadenceSeconds: 2,
+  refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
-  width: "wide",
+  width: "full",
   height: "natural",
-  component: RigControlPanel,
-});
-
-registerPanel({
-  id: "rotator-control",
-  title: "Rotator Control",
-  category: "tools",
-  refreshCadenceSeconds: 2,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: RotatorControlPanel,
+  component: ToolsPanel,
 });
 
 // Consolidates six panels that used to each register separately (Active
@@ -138,56 +125,6 @@ registerPanel({
   offlineBehavior: "always-available",
   height: "tall",
   component: BandPlanPanel,
-});
-
-registerPanel({
-  id: "bearing-distance",
-  title: "Bearing & Distance",
-  category: "tools",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  component: BearingDistancePanel,
-});
-
-registerPanel({
-  id: "antenna-calculator",
-  title: "Antenna Length Calculator",
-  category: "tools",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  component: AntennaCalculatorPanel,
-});
-
-registerPanel({
-  id: "decibel-calculator",
-  title: "dB Calculator",
-  category: "tools",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  component: DecibelCalculatorPanel,
-});
-
-registerPanel({
-  id: "swr-calculator",
-  title: "SWR / Impedance Calculator",
-  category: "tools",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  component: SwrCalculatorPanel,
-});
-
-registerPanel({
-  id: "rf-safety",
-  title: "RF Power Density Calculator",
-  category: "tools",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: RfSafetyPanel,
 });
 
 registerPanel({
