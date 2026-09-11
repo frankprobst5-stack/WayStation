@@ -3,15 +3,9 @@ import StationIdentityPanel from "./StationIdentityPanel";
 import AppearancePanel from "./AppearancePanel";
 import RequiredSoftwarePanel from "./RequiredSoftwarePanel";
 import WorldMapPanel from "./WorldMapPanel";
-import AlertsPanel from "./AlertsPanel";
 import MessagingPanel from "./MessagingPanel";
-import IncidentInfoPanel from "./IncidentInfoPanel";
-import IncidentsPanel from "./IncidentsPanel";
-import PersonnelPanel from "./PersonnelPanel";
-import ResourceRequestsPanel from "./ResourceRequestsPanel";
+import IncidentOpsPanel from "./IncidentOpsPanel";
 import TacticalMapPanel from "./TacticalMapPanel";
-import ResourcesPanel from "./ResourcesPanel";
-import ReadinessPanel from "./ReadinessPanel";
 import ActivityPanel from "./ActivityPanel";
 import SpectrumReferencePanel from "./SpectrumReferencePanel";
 import ChannelDirectoryPanel from "./ChannelDirectoryPanel";
@@ -69,58 +63,19 @@ registerPanel({
   component: RotatorControlPanel,
 });
 
+// Consolidates six panels that used to each register separately (Active
+// Alerts, Situation Summary, Incidents, Personnel, Resource Requests, and
+// Resources further below) into one tabbed page -- see
+// IncidentOpsPanel.tsx. Every real panel component is reused unchanged.
 registerPanel({
-  id: "alerts",
-  title: "Active Alerts",
-  category: "incident-ops",
-  refreshCadenceSeconds: 300,
-  offlineBehavior: "degrades",
-  height: "tall",
-  component: AlertsPanel,
-});
-
-registerPanel({
-  id: "incident-info",
-  title: "Situation Summary",
+  id: "incident-ops",
+  title: "Incident Ops",
   category: "incident-ops",
   refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
+  offlineBehavior: "degrades",
   width: "full",
   height: "natural",
-  component: IncidentInfoPanel,
-});
-
-registerPanel({
-  id: "incidents",
-  title: "Incidents",
-  category: "incident-ops",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: IncidentsPanel,
-});
-
-registerPanel({
-  id: "personnel",
-  title: "Personnel",
-  category: "incident-ops",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: PersonnelPanel,
-});
-
-registerPanel({
-  id: "resource-requests",
-  title: "Resource Requests",
-  category: "incident-ops",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: ResourceRequestsPanel,
+  component: IncidentOpsPanel,
 });
 
 registerPanel({
@@ -147,24 +102,6 @@ registerPanel({
   width: "full",
   height: "natural",
   component: MessagingPanel,
-});
-
-registerPanel({
-  id: "resources",
-  title: "Resources",
-  category: "incident-ops",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  component: ResourcesPanel,
-});
-
-registerPanel({
-  id: "readiness",
-  title: "Prepare for Offline",
-  category: "incident-ops",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  component: ReadinessPanel,
 });
 
 // Consolidates what used to be seven separately-registered panels (Space
