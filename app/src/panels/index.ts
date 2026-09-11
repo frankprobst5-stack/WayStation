@@ -7,12 +7,8 @@ import MessagingPanel from "./MessagingPanel";
 import IncidentOpsPanel from "./IncidentOpsPanel";
 import TacticalMapPanel from "./TacticalMapPanel";
 import ActivityPanel from "./ActivityPanel";
-import SpectrumReferencePanel from "./SpectrumReferencePanel";
-import ChannelDirectoryPanel from "./ChannelDirectoryPanel";
-import BandPlanPanel from "./BandPlanPanel";
+import ReferencePanel from "./ReferencePanel";
 import ToolsPanel from "./ToolsPanel";
-import RepeaterLookupPanel from "./RepeaterLookupPanel";
-import WebSdrPanel from "./WebSdrPanel";
 import ContestCalendarPanel from "./ContestCalendarPanel";
 import DxClusterPanel from "./DxClusterPanel";
 import FlightTrackingPanel from "./FlightTrackingPanel";
@@ -20,7 +16,6 @@ import ScannerPanel from "./ScannerPanel";
 import WeatherPanel from "./WeatherPanel";
 import AboutPanel from "./AboutPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
-import FieldReferencePanel from "./FieldReferencePanel";
 import UserManualPanel from "./UserManualPanel";
 import SyncPanel from "./SyncPanel";
 
@@ -107,67 +102,19 @@ registerPanel({
   component: ActivityPanel,
 });
 
+// Consolidates six panels that used to each register separately (Spectrum
+// Reference, Band Plan, Repeater Lookup, WebSDR Directory, Channel
+// Directory, and Field Reference) into one tabbed page -- see
+// ReferencePanel.tsx. Every real panel component is reused unchanged.
 registerPanel({
-  id: "spectrum-reference",
-  title: "Spectrum Reference",
-  category: "reference",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  height: "tall",
-  component: SpectrumReferencePanel,
-});
-
-registerPanel({
-  id: "band-plan",
-  title: "Band Plan",
-  category: "reference",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  height: "tall",
-  component: BandPlanPanel,
-});
-
-registerPanel({
-  id: "repeater-lookup",
-  title: "Repeater Lookup",
-  category: "reference",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "internet-only",
-  width: "wide",
-  component: RepeaterLookupPanel,
-});
-
-registerPanel({
-  id: "websdr-directory",
-  title: "WebSDR Directory",
-  category: "reference",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "internet-only",
-  width: "full",
-  height: "natural",
-  component: WebSdrPanel,
-});
-
-registerPanel({
-  id: "channel-directory",
-  title: "Channel Directory",
-  category: "reference",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "full",
-  height: "natural",
-  component: ChannelDirectoryPanel,
-});
-
-registerPanel({
-  id: "field-reference",
-  title: "Field Reference (Kiwix Library Search)",
+  id: "reference",
+  title: "Reference",
   category: "reference",
   refreshCadenceSeconds: null,
   offlineBehavior: "degrades",
   width: "full",
-  height: "tall",
-  component: FieldReferencePanel,
+  height: "natural",
+  component: ReferencePanel,
 });
 
 // Kept as separate, hobbyist-flagged registrations (not folded into
