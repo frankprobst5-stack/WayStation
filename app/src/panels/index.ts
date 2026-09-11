@@ -1,7 +1,5 @@
 import { registerPanel } from "./registry";
-import StationIdentityPanel from "./StationIdentityPanel";
-import AppearancePanel from "./AppearancePanel";
-import RequiredSoftwarePanel from "./RequiredSoftwarePanel";
+import SettingsPanel from "./SettingsPanel";
 import WorldMapPanel from "./WorldMapPanel";
 import MessagingPanel from "./MessagingPanel";
 import IncidentOpsPanel from "./IncidentOpsPanel";
@@ -14,10 +12,7 @@ import DxClusterPanel from "./DxClusterPanel";
 import FlightTrackingPanel from "./FlightTrackingPanel";
 import ScannerPanel from "./ScannerPanel";
 import WeatherPanel from "./WeatherPanel";
-import AboutPanel from "./AboutPanel";
-import DiagnosticsPanel from "./DiagnosticsPanel";
 import UserManualPanel from "./UserManualPanel";
-import SyncPanel from "./SyncPanel";
 
 registerPanel({
   id: "world-map",
@@ -180,35 +175,19 @@ registerPanel({
 });
 
 
+// Consolidates six panels that used to each register separately (Station,
+// Appearance, Required Software, Diagnostics, Peer Sync, and About) into
+// one tabbed page -- see SettingsPanel.tsx. Every real panel component is
+// reused unchanged.
 registerPanel({
-  id: "station-identity",
-  title: "Station",
+  id: "settings",
+  title: "Settings",
   category: "settings",
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
-  width: "wide",
+  width: "full",
   height: "natural",
-  component: StationIdentityPanel,
-});
-
-registerPanel({
-  id: "appearance",
-  title: "Appearance",
-  category: "settings",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  component: AppearancePanel,
-});
-
-registerPanel({
-  id: "required-software",
-  title: "Required Software",
-  category: "settings",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: RequiredSoftwarePanel,
+  component: SettingsPanel,
 });
 
 registerPanel({
@@ -220,38 +199,6 @@ registerPanel({
   width: "full",
   height: "natural",
   component: UserManualPanel,
-});
-
-registerPanel({
-  id: "diagnostics",
-  title: "Diagnostics",
-  category: "settings",
-  refreshCadenceSeconds: 15,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: DiagnosticsPanel,
-});
-
-registerPanel({
-  id: "sync",
-  title: "Peer Sync",
-  category: "settings",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "natural",
-  component: SyncPanel,
-});
-
-registerPanel({
-  id: "about",
-  title: "About",
-  category: "settings",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  height: "natural",
-  component: AboutPanel,
 });
 
 export { listPanels } from "./registry";
