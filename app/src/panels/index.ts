@@ -4,8 +4,7 @@ import AppearancePanel from "./AppearancePanel";
 import RequiredSoftwarePanel from "./RequiredSoftwarePanel";
 import WorldMapPanel from "./WorldMapPanel";
 import AlertsPanel from "./AlertsPanel";
-import NetControlPanel from "./NetControlPanel";
-import MessagesPanel from "./MessagesPanel";
+import MessagingPanel from "./MessagingPanel";
 import IncidentInfoPanel from "./IncidentInfoPanel";
 import IncidentsPanel from "./IncidentsPanel";
 import PersonnelPanel from "./PersonnelPanel";
@@ -13,9 +12,6 @@ import ResourceRequestsPanel from "./ResourceRequestsPanel";
 import TacticalMapPanel from "./TacticalMapPanel";
 import ResourcesPanel from "./ResourcesPanel";
 import ReadinessPanel from "./ReadinessPanel";
-import WinlinkPanel from "./WinlinkPanel";
-import Js8CallPanel from "./Js8CallPanel";
-import PacketPanel from "./PacketPanel";
 import ActivityPanel from "./ActivityPanel";
 import SpectrumReferencePanel from "./SpectrumReferencePanel";
 import ChannelDirectoryPanel from "./ChannelDirectoryPanel";
@@ -38,7 +34,6 @@ import FieldReferencePanel from "./FieldReferencePanel";
 import RigControlPanel from "./RigControlPanel";
 import RotatorControlPanel from "./RotatorControlPanel";
 import UserManualPanel from "./UserManualPanel";
-import MeshPanel from "./MeshPanel";
 import SyncPanel from "./SyncPanel";
 
 registerPanel({
@@ -139,26 +134,19 @@ registerPanel({
   component: TacticalMapPanel,
 });
 
+// Consolidates six panels that used to each register separately (Net
+// Control, Messages, Winlink, JS8Call, Packet/APRS, and Mesh further
+// below) into one tabbed page -- see MessagingPanel.tsx. Every real panel
+// component is reused unchanged.
 registerPanel({
-  id: "net-control",
-  title: "Net Control",
+  id: "messaging",
+  title: "Messaging",
   category: "messaging",
   refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
-  height: "tall",
-  component: NetControlPanel,
-});
-
-registerPanel({
-  id: "messages",
-  title: "Messages (ICS-213 / ICS-309)",
-  category: "messaging",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "always-available",
-  width: "wide",
+  offlineBehavior: "degrades",
+  width: "full",
   height: "natural",
-  component: MessagesPanel,
+  component: MessagingPanel,
 });
 
 registerPanel({
@@ -177,33 +165,6 @@ registerPanel({
   refreshCadenceSeconds: null,
   offlineBehavior: "always-available",
   component: ReadinessPanel,
-});
-
-registerPanel({
-  id: "winlink",
-  title: "Winlink",
-  category: "messaging",
-  refreshCadenceSeconds: 15,
-  offlineBehavior: "degrades",
-  component: WinlinkPanel,
-});
-
-registerPanel({
-  id: "js8call",
-  title: "JS8Call",
-  category: "messaging",
-  refreshCadenceSeconds: 15,
-  offlineBehavior: "degrades",
-  component: Js8CallPanel,
-});
-
-registerPanel({
-  id: "packet",
-  title: "Packet (APRS/Direwolf)",
-  category: "messaging",
-  refreshCadenceSeconds: 15,
-  offlineBehavior: "degrades",
-  component: PacketPanel,
 });
 
 // Consolidates what used to be seven separately-registered panels (Space
@@ -397,17 +358,6 @@ registerPanel({
   component: WeatherPanel,
 });
 
-
-registerPanel({
-  id: "mesh",
-  title: "Mesh (Meshtastic)",
-  category: "messaging",
-  refreshCadenceSeconds: null,
-  offlineBehavior: "degrades",
-  width: "full",
-  height: "natural",
-  component: MeshPanel,
-});
 
 registerPanel({
   id: "station-identity",
