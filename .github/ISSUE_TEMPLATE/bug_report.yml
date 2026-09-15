@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in WayStation is broken or not working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing WayStation — the more detail here, the faster this can get fixed.
+        This is an early public test release, so real bugs are expected; you're not
+        wasting anyone's time by reporting one.
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the ___ panel
+        2. Do ___
+        3. See ___
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install WayStation?
+      options:
+        - Windows .msi
+        - Linux .deb
+        - Linux .AppImage
+        - Built from source
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: citadel
+    attributes:
+      label: Were you running WayStation with or without Citadel?
+      description: Some features enrich themselves automatically when a Citadel instance is reachable.
+      options:
+        - Running standalone (no Citadel)
+        - Running alongside Citadel
+        - Not sure
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: |
+        Any error message, dialog text, or terminal/console output you saw. If you ran
+        WayStation from a terminal (or built it from source), please paste that output too.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, connected hardware (radio, GPS, etc.), anything that might help.

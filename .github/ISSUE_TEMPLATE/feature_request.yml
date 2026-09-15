@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest something WayStation doesn't do yet
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: What real operational need or scenario is this for?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you want WayStation to do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Related panels, hardware you have (radios, rotators, GPS), links to similar tools, etc.
