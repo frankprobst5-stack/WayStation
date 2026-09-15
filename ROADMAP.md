@@ -10,7 +10,7 @@ Online connectivity enriches the local operational picture. When connectivity de
 
 WayStation is the comms component of a larger project, [Citadel](https://github.com/frankprobst5-stack/Project-Citadel) — a self-hosted, offline-first home command center. Citadel launches WayStation directly (see `app/src-tauri/src/lib.rs`'s deep-link registration); the two are separate applications, not one embedded in the other. The eventual deployment target is **8 independent homes**, each running its own Citadel+WayStation instance, coordinating with each other over long-range RF when normal internet/phone service is down.
 
-**Deployment goal, refined 2026-09-03:** Citadel integration remains the primary target — that doesn't change. WayStation is also intended to eventually work standalone for the wider public, where an operator without Citadel plugs in their own local AI/map server/whatever else they need instead. This mostly falls out of the architecture already in place rather than requiring a separate build: every Citadel-dependent feature (map tiles, and the weather/AI/power items in **Planned backlog** below) follows the same configurable-host-with-graceful-degrade pattern already proven by the map tiles' existing OpenFreeMap fallback. Before any public release, this still needs an audit for anything that quietly hard-requires Citadel, plus real "no-Citadel setup" documentation — tracked as a Phase F prerequisite.
+**Deployment goal, refined 2026-09-03:** Citadel integration remains the primary target — that doesn't change. WayStation is also intended to eventually work standalone for the wider public, where an operator without Citadel plugs in their own local AI/map server/whatever else they need instead. This mostly falls out of the architecture already in place rather than requiring a separate build: every Citadel-dependent feature (map tiles, and the weather/AI/power items in **Planned backlog** below) follows the same configurable-host-with-graceful-degrade pattern already proven by the map tiles' existing OpenFreeMap fallback. The hard-requires-Citadel audit is done (see Phase F below for the real evidence) and README.md now has real "no-Citadel setup" documentation.
 
 **Non-negotiable principle:** every future feature must either strengthen the shared operational core, provide it with trustworthy data, deliver its objects, help the operator act on them, or improve field reliability. New panels must not become isolated islands.
 
@@ -196,7 +196,29 @@ Reconciled 2026-09-03 against a longer external planning list Frank was carrying
 - **Phase C — Two-station communications proof.** ✅ **Done except hardware.** Durable queue + delivery-attempt history (v31), reconciliation logic proven between two real databases, the Peer Sync UI, and the WSP/1 spec are all done. Left: reusing this exact proof over physical mesh/AREDN once hardware exists — genuinely blocked on hardware, not on more design or code.
 - **Phase D — Incident operations.** ✅ **Complete, 2026-09-02.** Real multi-incident lifecycle, `incident_id` tagging on messages/markers, `personnel` roster with status + assignment, `resource_requests` with a fulfillment lifecycle, `incident_events` operational timeline wired into every write path, `sitreps` snapshot generation, and the Tactical Map now filters markers/personnel/resource-requests by incident with an "All incidents" default. Personnel and resource requests gained a `grid_square` field (migration v37) so they can plot at all — `location` stayed free text, `grid_square` is the new field that actually derives coordinates, same pattern the `resources` board already used. Nothing left open in Phase D.
 - **Phase E — Software-complete application.** 🔲 Not started as a phase, though 2026-09-02/03's work is a down payment on its philosophy: build every hardware-facing capability against simulation/replay/fixtures so real equipment is never a blocker for finishing the software. Most of this phase's real scope is now itemized in **Planned backlog** above — scanner/ADS-B/weather ingestion, local AI, and the multi-node mesh simulation problem are all Phase E candidates once picked up.
-- **Phase F — Release candidate and tester deployment.** 🔲 Not started.
+- **Phase F — Release candidate and tester deployment.** 🔄 In progress,
+  2026-09-14. The "audit for anything that quietly hard-requires Citadel"
+  prerequisite mentioned above is done, with real evidence, not just
+  checked off: every Citadel host reference (`citadel_map_host`,
+  `citadel_kiwix_host`, ports 8085/8095 in `ai_sitrep.rs`,
+  `transcription.rs`, `citadel_scanner.rs`, `kiwix_search.rs`, `db.rs`)
+  resolves through a safe `.unwrap_or("127.0.0.1:8085")`-style default,
+  and every Tauri command returns `Result<_, String>` with `.map_err()`
+  turning a Citadel-unreachable network failure into a readable error
+  string surfaced to the UI, never a panic. No crash risk found — the
+  configurable-host-with-graceful-degrade pattern this file already
+  claimed for map tiles genuinely holds everywhere else Citadel is
+  referenced too. Also added this session: a real root `README.md` and
+  `LICENSE` (GPL-3.0-or-later, matching `package.json`'s declared
+  license but previously missing as an actual file — same class of gap
+  Citadel had and fixed earlier), and the first real tagged release,
+  `v0.1.0`, via the CI pipeline in `.github/workflows/release.yml` that
+  had existed but never actually been triggered before now. Known,
+  honestly-disclosed gaps going into this release: two `UserManualPanel.tsx`
+  sections (mesh/JS8Call/rig-control setup, band-plan reference) are
+  deliberately left as honest "not written yet" stubs rather than
+  guessed-at ham-radio content, and no macOS build exists (the release
+  workflow has no macOS runner configured).
 
 ---
 
