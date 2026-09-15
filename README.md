@@ -8,6 +8,10 @@ WayStation is an offline-first communications and field-operations desktop app f
 
 Online connectivity enriches the local operational picture while it's available. When connectivity degrades, WayStation retains cached information with honest age and provenance instead of pretending it's live. When the grid fails entirely, live RF, local hardware, nearby peers, and locally stored operational data take over — grid-down mode is the environment this app exists to serve, not a crippled fallback for when the "real" online version stops working.
 
+<p align="center">
+  <img src="screenshots/dashboard-overview.png" alt="WayStation's main dashboard, showing operational status, tactical map, and incident status" width="800">
+</p>
+
 ---
 
 ## Status: early public test release
@@ -21,6 +25,16 @@ But it's still pre-1.0 and under active field testing (a real month-long offline
 - Multi-node mesh networking is real and tested in isolation, but genuinely unverified with a second physical node in the field — see ROADMAP.md's own status tags for the full, current picture of what's BUILT+VERIFIED versus BUILT-BUT-HARDWARE-PENDING.
 
 If you hit something broken, that's exactly what this release is for — please report it.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/dashboard-comms-weather.png" alt="WayStation's radio/rotator control, communications status, space weather HF conditions, and local weather panels" width="800">
+</p>
+
+Radio and rotator control, live communications status, real HF propagation conditions from actual space-weather data, and local weather — all on the same dashboard, all degrading honestly when a data source isn't reachable rather than showing stale numbers as if they were current.
 
 ---
 
