@@ -70,3 +70,5 @@ Needs Node 22+ and a Rust toolchain, plus Tauri's own system dependencies (`libw
 ## License
 
 GPL-3.0-or-later — see [LICENSE](LICENSE) if present, or the license header in [app/package.json](app/package.json).
+
+**Important:** This covers WayStation's own original code only (everything under `app/src` and `app/src-tauri/src`) — it does not relicense anything else. Real third-party dependencies (MapLibre GL JS, PMTiles, protomaps-themes-base, React, and everything else in [app/package.json](app/package.json)) are pulled in through the normal npm package manager, not manually copied into this repo, and each keeps its own license as published — verified directly, not assumed: MapLibre GL JS, PMTiles, and protomaps-themes-base are all BSD-3-Clause; React/React-DOM are MIT. See [Citadel's THIRD_PARTY_LICENSES.md](https://github.com/frankprobst5-stack/Project-Citadel/blob/main/THIRD_PARTY_LICENSES.md) for the same libraries' real copyright holders and sources — WayStation depends on the identical set, just via npm rather than a manually-vendored copy.
