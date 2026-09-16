@@ -147,7 +147,60 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 
 **2026-09-07: Frank is standing up a second, physically separate computer to run WayStation fully offline for a real month-long field test — the actual point of everything built so far. Active feature development pauses here, deliberately: every item below is real, scoped, and not forgotten, but adding more untested surface area right before the test would work against the test's own purpose. Nothing here blocks going offline.** Before cutting over, confirm the offline machine is running latest `main` — the `source_health` launch-crash fix (2026-09-06, see changelog) landed the same session as several other changes, so a stale clone could carry that exact crash into the field. Separately, the hardware-blocked items in **Built, but not yet proven in the field** above aren't "deferred" in this sense — they're already code-complete and waiting on real gear (a second mesh node, an RTL-SDR, a real correspondent station), not on a decision to wait; real field use may exercise some of them for the first time regardless.
 
-**A separate, larger v2 vision landed the same day: see [DESIGN.md](DESIGN.md).** A full page-by-page redesign direction for both WayStation and Citadel (Frank + another Claude session, working from real mockup screenshots), covering a Citadel home-screen redesign (Off-Grid Readiness score, health strip), a genuinely new First Aid & Medical Support subsystem, tab reorganization across nearly every existing WayStation page, and several new cross-feature integrations (POTA→rig, reception report→map, satellite pass→Doppler countdown, aircraft proximity/altitude alerts). None of it is scheduled or broken into real tasks yet — the mockup screenshots themselves still need to be gone through for concrete layout/interaction detail before any of this is buildable work, same as everything else in this section.
+**A separate, larger v2 vision landed the same day: see [DESIGN.md](DESIGN.md).** A full page-by-page redesign direction for both WayStation and Citadel (Frank + another Claude session, working from real mockup screenshots), covering a Citadel home-screen redesign (Off-Grid Readiness score, health strip), a genuinely new First Aid & Medical Support subsystem, tab reorganization across nearly every existing WayStation page, and several new cross-feature integrations (POTA→rig, reception report→map, satellite pass→Doppler countdown, aircraft proximity/altitude alerts). None of it is scheduled or broken into real tasks yet — the mockup screenshots themselves still need to be gone through for concrete layout/interaction detail before any of this is buildable work, same as everything else in this section. **Note this is the UI/UX layer of the redesign** — layout, page organization, visual system — distinct from the architecture-layer initiative below, which is about how capability is packaged and toggled, not how it's laid out on screen. The two are complementary, not overlapping.
+
+**A major new architecture initiative, 2026-09-15: give WayStation a real modular/plugin
+architecture, matching Citadel's philosophy (not its literal mechanism).** Sparked by
+first-hand research on XTOC (see Interoperability & reach below) revealing a much bigger
+real feature surface than the original five-gap review found — D-STAR/D-PRS, Mercury HF
+ARQ, MeshCore, Reticulum/RNode, FLDIGI, VarAC, ViperGram transports; an integrated RTL-SDR
+"Radios workbench"; a governed multi-operator "Shared Workspace/TOC Node" model (viewer/
+operator/planner/admin roles, conflict blocking, audit history); 82 native ICS forms with
+replay-resistant signing ("Trust Link" — a real capability WSP/1's own signing explicitly
+lacks today, see WSP-1.md); drone flight-planning exports (Litchi/QGroundControl/MAVLink/
+KMZ/ATAK); DJI/RTSP video ISR; and a more sophisticated per-recipient delivery-tracking
+model ("Assured Delivery" — queued/transmitted/ACK/expired/failed, TTL, dedupe, overdue/
+silence timers) than WayStation's current delivery-attempt history. Trying to absorb all of
+that into one growing monolithic Tauri binary is the wrong shape for it. **Real technical
+distinction, not glossed over**: Citadel's actual module mechanism is Docker Compose
+profiles — separate containers on a persistent host — which doesn't transfer literally to a
+single compiled desktop binary. WayStation borrows the *philosophy* (pick only the
+capability you want, don't carry the weight of what you don't) through its own,
+WayStation-appropriate mechanism — a real plugin/feature-toggle architecture inside the
+Tauri app itself. **Which exact mechanism (a genuine plugin system, compile-time feature
+flags with a runtime UI toggle, or something else) is real, unstarted research, not a
+decision made here.** Rough three-way division of labor across the family, itself still
+open to revision: Citadel hosts new shared/always-on capability as real Citadel modules
+(the RTL-SDR workbench, D-STAR/MeshCore/Reticulum, drone/video ISR — matching the same
+hardware-hub pattern already proven for weather/maps/scanner); WayStation keeps and
+modularizes capability that has to run on the operator's own machine against
+locally-attached hardware (existing mesh/Winlink/JS8Call/APRS, plus new local radio
+transports); Muster (a new sibling project, a lightweight browser/PWA client — see its own
+ROADMAP.md) gets its own frontend module system, consuming both. **Explicit safety
+sequencing, Frank's own call**: this is planned now, on a separate branch, and does not
+touch the current field-test build — the physically separate offline-test machine keeps
+running exactly what it has, testers keep exercising the hardware-side transports
+(mesh/Pat/JS8Call/APRS) that stay regardless of any redesign, and none of this work merges
+into `main` until the field test concludes. As of 2026-09-15 (nine days into the real
+month-long test) no real bugs have surfaced — genuinely good news, worth being honest that
+it's encouraging, not yet conclusive, since the test itself isn't finished. **One concrete
+action item this research surfaced**: XTOC has a real, currently-shipping feature literally
+named "XCAST" (bulletins/video). WayStation's own planned community-bulletin feature (see
+Interoperability & reach below) is also named "XCAST" — a real naming collision, same
+category of thing this session already caught and fixed for Drawbridge/Outpost/Vanguard on
+the Gated/Muster side. Needs an actual naming decision before that feature is built, not
+after. **Binding constraint on this whole initiative, added 2026-09-16 (Frank's own concern,
+and a real one — read this before touching anything here): WSP/1 is a versioned public
+contract Muster (and potentially other future consumers) depends on, not an internal
+implementation detail this modularization work is free to change incidentally.**
+Modularizing *which capabilities are compiled into WayStation* and *how WSP/1 itself works*
+are two separable layers — this whole initiative is about the first one. WSP/1's own spec
+already anticipates needing to change safely (`wsp_version`/`wsp_kind` exist specifically so
+a future format change is a clean, detectable rejection, not a silent break) — whoever picks
+this work up must preserve that: any actual change to WSP/1 needs real backward
+compatibility or an explicit version bump, never a silent behavior change a downstream
+consumer discovers by breaking. Same rule recorded in Muster's own ROADMAP.md and the
+Citadel Ecosystem Master Architecture doc, so it isn't just written once and forgotten.
 
 Reconciled 2026-09-03 against a longer external planning list Frank was carrying separately, item by item against the real codebase rather than taken at face value — some items turned out to already exist elsewhere (WSP/1's own "what's not in WSP/1" section already named three of these), one turned out to already be fully built (offline map tiles, via PMTiles, not the `.mbtiles` the original list assumed), and a few were dropped or narrowed after discussion. Organized by area, not by priority — flight tracking, weather, and the scanner subsystem are the operator's stated top priority given a real high-disaster-risk location, flagged individually below.
 
