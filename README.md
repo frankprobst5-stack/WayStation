@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="brand/logo.png" alt="Citadel Ecosystem" width="360">
+</p>
+
 # WayStation
 
 **Online for awareness. Offline for operations. Built to shine when the grid goes down.**
