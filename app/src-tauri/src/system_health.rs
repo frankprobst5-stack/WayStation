@@ -18,13 +18,30 @@ use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
-use sysinfo::{Disks, System};
+use sysinfo::{Components, Disks, System};
 use tauri::{AppHandle, Emitter, Manager};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
+/// Real bug found 2026-09-20 from a live Windows tester report (WayStation
+/// typing lag: every keystroke taking 30-60 seconds, escalating to a full
+/// "Not Responding" freeze): `Disks` and `Components` were being
+/// reconstructed from scratch -- a full disk/volume and hardware-sensor
+/// re-enumeration -- on every 3-second poll, forever, for the app's whole
+/// lifetime. `Components::new_with_refreshed_list()` on Windows goes
+/// through WMI, which is well-known for being slow and occasionally
+/// stalling for multiple seconds under real-world conditions (especially
+/// with third-party antivirus also hooking WMI); `Disks::
+/// new_with_refreshed_list()` re-enumerates every mounted volume, worse
+/// on a machine also running Docker Desktop's WSL2 virtual disks. Real
+/// fix: keep one persistent instance of each (same pattern this file
+/// already used correctly for `System` below) and call the real
+/// incremental `.refresh()` method sysinfo provides instead of
+/// reconstructing from scratch every cycle.
 pub struct SystemHealthState {
     system: Mutex<System>,
+    disks: Mutex<Disks>,
+    components: Mutex<Components>,
     latest: Mutex<Option<SystemHealthSnapshot>>,
 }
 
@@ -32,6 +49,8 @@ impl SystemHealthState {
     pub fn new() -> Self {
         SystemHealthState {
             system: Mutex::new(System::new_all()),
+            disks: Mutex::new(Disks::new_with_refreshed_list()),
+            components: Mutex::new(Components::new_with_refreshed_list()),
             latest: Mutex::new(None),
         }
     }
@@ -83,7 +102,7 @@ fn find_cpu_temperature(components: &[(String, f32)]) -> Option<f32> {
         .map(|(_, temp)| *temp)
 }
 
-fn snapshot(system: &mut System) -> SystemHealthSnapshot {
+fn snapshot(system: &mut System, disks: &mut Disks, components: &mut Components) -> SystemHealthSnapshot {
     system.refresh_cpu_usage();
     system.refresh_memory();
 
@@ -96,7 +115,11 @@ fn snapshot(system: &mut System) -> SystemHealthSnapshot {
         0.0
     };
 
-    let disks = Disks::new_with_refreshed_list();
+    // Incremental refresh of the persistent instance -- NOT
+    // Disks::new_with_refreshed_list(), which reconstructs from scratch
+    // (a full volume re-enumeration) every single call. See this state's
+    // own doc comment above for the real bug this replaced.
+    disks.refresh();
     let disk_rows: Vec<(std::path::PathBuf, u64, u64)> = disks
         .list()
         .iter()
@@ -114,7 +137,12 @@ fn snapshot(system: &mut System) -> SystemHealthSnapshot {
         _ => (None, None, None),
     };
 
-    let components = sysinfo::Components::new_with_refreshed_list();
+    // Same fix as disks above -- incremental refresh, not a fresh
+    // Components::new_with_refreshed_list() every cycle. This one matters
+    // even more on Windows, where component enumeration goes through WMI,
+    // a real, well-known source of multi-second stalls when re-queried
+    // from scratch repeatedly.
+    components.refresh();
     let component_rows: Vec<(String, f32)> = components
         .list()
         .iter()
@@ -138,7 +166,9 @@ pub fn poll_once(app: &AppHandle) {
     let state = app.state::<SystemHealthState>();
     let snap = {
         let mut system = state.system.lock().expect("system_health mutex poisoned");
-        snapshot(&mut system)
+        let mut disks = state.disks.lock().expect("system_health mutex poisoned");
+        let mut components = state.components.lock().expect("system_health mutex poisoned");
+        snapshot(&mut system, &mut disks, &mut components)
     };
     *state.latest.lock().expect("system_health mutex poisoned") = Some(snap);
     let _ = app.emit("system-health-changed", ());
