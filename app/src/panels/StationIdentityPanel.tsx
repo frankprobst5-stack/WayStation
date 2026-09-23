@@ -13,6 +13,7 @@ interface StationProfile {
   rotctld_host: string | null;
   rotator_enabled: boolean;
   citadel_map_host: string | null;
+  citadel_vault_token: string | null;
   local_weather_brand: string | null;
   local_weather_host: string | null;
   citadel_kiwix_host: string | null;
@@ -42,6 +43,7 @@ function StationIdentityPanel() {
   const [rotctldHost, setRotctldHost] = useState("");
   const [rotatorEnabled, setRotatorEnabled] = useState(true);
   const [citadelMapHost, setCitadelMapHost] = useState("");
+  const [citadelVaultToken, setCitadelVaultToken] = useState("");
   const [localWeatherBrand, setLocalWeatherBrand] = useState("");
   const [localWeatherHost, setLocalWeatherHost] = useState("");
   const [citadelKiwixHost, setCitadelKiwixHost] = useState("");
@@ -61,6 +63,7 @@ function StationIdentityPanel() {
       setRotctldHost(p.rotctld_host ?? "");
       setRotatorEnabled(p.rotator_enabled);
       setCitadelMapHost(p.citadel_map_host ?? "");
+      setCitadelVaultToken(p.citadel_vault_token ?? "");
       setLocalWeatherBrand(p.local_weather_brand ?? "");
       setLocalWeatherHost(p.local_weather_host ?? "");
       setCitadelKiwixHost(p.citadel_kiwix_host ?? "");
@@ -86,6 +89,7 @@ function StationIdentityPanel() {
       rotctldHost: rotctldHost.trim() || null,
       rotatorEnabled,
       citadelMapHost: citadelMapHost.trim() || null,
+      citadelVaultToken: citadelVaultToken.trim() || null,
       localWeatherBrand: localWeatherBrand || null,
       localWeatherHost: localWeatherHost.trim() || null,
       citadelKiwixHost: citadelKiwixHost.trim() || null,
@@ -233,6 +237,21 @@ function StationIdentityPanel() {
           Blank uses this computer's default. If unreachable, the Tactical Map falls back to
           OpenFreeMap online tiles — see the User Manual for running your own tile server without
           Citadel.
+        </span>
+      </label>
+      <label>
+        Citadel vault-api token
+        <input
+          type="password"
+          value={citadelVaultToken}
+          onChange={(e) => setCitadelVaultToken(e.currentTarget.value)}
+          placeholder="paste the token from Citadel's own Settings page"
+        />
+        <span className="field-hint">
+          Required as of 2026-09-21 for the trunked-scanner bridge (status, config, recordings,
+          transcription) — Citadel's API now rejects requests without it. Find the real value on
+          Citadel's own Settings page and paste it here; it's a per-install secret, not something
+          WayStation can discover on its own.
         </span>
       </label>
       <label>

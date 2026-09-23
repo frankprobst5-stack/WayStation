@@ -44,6 +44,16 @@ fn station_citadel_host(db: &State<Db>) -> Option<String> {
     db::station_profile(&conn).citadel_map_host
 }
 
+/// Citadel's vault-api requires this on every /api/ request as of
+/// 2026-09-21 (a real tester's own security audit found none existed --
+/// see Citadel's own app.py comment for the full story). A missing token
+/// here means Citadel will honestly 401 rather than this silently
+/// sending an unauthenticated request.
+fn station_citadel_vault_token(db: &State<Db>) -> Option<String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    db::station_profile(&conn).citadel_vault_token
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScannerTranscript {
     #[serde(default)]
@@ -140,9 +150,11 @@ pub struct ScannerStatus {
 #[tauri::command]
 pub fn get_citadel_scanner_status(db: State<Db>) -> Result<ScannerStatus, String> {
     let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
     let url = format!("{}/api/scanner", citadel_base(&host));
     client()
         .get(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
         .send()
         .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?
         .error_for_status()
@@ -170,9 +182,11 @@ pub struct ScannerConfigResponse {
 #[tauri::command]
 pub fn get_citadel_scanner_config(db: State<Db>) -> Result<ScannerConfigResponse, String> {
     let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
     let url = format!("{}/api/scanner/config", citadel_base(&host));
     client()
         .get(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
         .send()
         .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?
         .error_for_status()
@@ -215,9 +229,11 @@ pub struct ScannerConfigRequest {
 #[tauri::command]
 pub fn save_citadel_scanner_config(db: State<Db>, request: ScannerConfigRequest) -> Result<Value, String> {
     let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
     let url = format!("{}/api/scanner/config", citadel_base(&host));
     let resp = client()
         .post(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
         .json(&request)
         .send()
         .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?;

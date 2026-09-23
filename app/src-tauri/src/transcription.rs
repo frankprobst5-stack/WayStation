@@ -39,6 +39,17 @@ fn station_citadel_host(db: &State<Db>) -> Option<String> {
     db::station_profile(&conn).citadel_map_host
 }
 
+/// Citadel's vault-api requires this on every /api/ request as of
+/// 2026-09-21 (a real tester's own security audit found none existed --
+/// see Citadel's own app.py comment for the full story, and
+/// citadel_scanner.rs's identical helper). A missing token here means
+/// Citadel will honestly 401 rather than this silently sending an
+/// unauthenticated request.
+fn station_citadel_vault_token(db: &State<Db>) -> Option<String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    db::station_profile(&conn).citadel_vault_token
+}
+
 /// Mirrors `transcription.py`'s `list_recordings()` output exactly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScannerRecording {
@@ -53,9 +64,11 @@ pub struct ScannerRecording {
 #[tauri::command]
 pub fn get_scanner_recordings(db: State<Db>) -> Result<Vec<ScannerRecording>, String> {
     let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
     let url = format!("{}/api/scanner/recordings", citadel_base(&host));
     client()
         .get(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
         .send()
         .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?
         .error_for_status()
@@ -83,9 +96,11 @@ struct TranscribeResponse {
 #[tauri::command]
 pub fn transcribe_recording(db: State<Db>, filename: String) -> Result<String, String> {
     let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
     let url = format!("{}/api/scanner/transcribe", citadel_base(&host));
     let resp: TranscribeResponse = client()
         .post(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
         .json(&serde_json::json!({ "filename": filename }))
         .send()
         .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?
