@@ -133,21 +133,26 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
 
 function MessagingPanel() {
   const [tab, setTab] = useState<Tab>("Overview");
-  // Mesh is the first local-hardware transport with a real Settings >
-  // Modules toggle (2026-09-25) -- hides its own tab here when off, the
-  // same way Tactical Mode already hides hobbyist panels from the sidebar.
-  // Winlink/JS8Call/Packet don't have their own toggle yet (see
-  // ModulesPanel.tsx's own note on why), so their tabs stay unconditional.
+  // Mesh and Winlink both have real Settings > Modules toggles now
+  // (2026-09-25) -- each hides its own tab here when off, the same way
+  // Tactical Mode already hides hobbyist panels from the sidebar.
+  // JS8Call/Packet don't have their own toggle yet (see ModulesPanel.tsx's
+  // own note on why), so their tabs stay unconditional.
   const [meshEnabled, setMeshEnabled] = useState(true);
+  const [winlinkEnabled, setWinlinkEnabled] = useState(true);
 
   useEffect(() => {
-    invoke<{ mesh_enabled: boolean }>("get_station_profile").then((p) => setMeshEnabled(p.mesh_enabled));
+    invoke<{ mesh_enabled: boolean; winlink_enabled: boolean }>("get_station_profile").then((p) => {
+      setMeshEnabled(p.mesh_enabled);
+      setWinlinkEnabled(p.winlink_enabled);
+    });
   }, []);
 
-  const visibleTabs = TABS.filter((t) => meshEnabled || t !== "Mesh (Meshtastic)");
+  const visibleTabs = TABS.filter((t) => (meshEnabled || t !== "Mesh (Meshtastic)") && (winlinkEnabled || t !== "Winlink"));
   useEffect(() => {
     if (!meshEnabled && tab === "Mesh (Meshtastic)") setTab("Overview");
-  }, [meshEnabled, tab]);
+    if (!winlinkEnabled && tab === "Winlink") setTab("Overview");
+  }, [meshEnabled, winlinkEnabled, tab]);
 
   return (
     <div className="panel-weather">

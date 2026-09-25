@@ -270,6 +270,7 @@ pub fn run() {
             pat::get_winlink_status,
             pat::get_winlink_inbox,
             pat::restart_winlink_service,
+            pat::set_winlink_enabled,
             direwolf::get_direwolf_status,
             direwolf::start_direwolf,
             direwolf::stop_direwolf,

@@ -26,6 +26,7 @@ interface StationProfileModuleFields {
   mesh_enabled: boolean;
   rig_enabled: boolean;
   rotator_enabled: boolean;
+  winlink_enabled: boolean;
 }
 
 const MODULE_CATALOG: ModuleManifest[] = [
@@ -37,6 +38,15 @@ const MODULE_CATALOG: ModuleManifest[] = [
     requiresHardware: true,
     profileField: "mesh_enabled",
     command: "set_mesh_enabled",
+  },
+  {
+    id: "winlink",
+    title: "Winlink (Pat)",
+    icon: "✉",
+    description: "Email-style traffic over RF or internet via the real pat binary. Unlike the others here, Pat is a real subprocess — off actually stops it, not just its status poll.",
+    requiresHardware: false,
+    profileField: "winlink_enabled",
+    command: "set_winlink_enabled",
   },
   {
     id: "rig",
@@ -130,9 +140,9 @@ function ModulesPanel() {
         ))}
       </div>
       <div className="bandplan-disclaimer">
-        Winlink, JS8Call, and Packet (APRS/Direwolf) don't have their own toggle here yet — each manages a real
-        subprocess (a mailbox daemon, an audio capture device), so turning one off should also stop that process
-        cleanly, not just skip a status poll. That's real, distinct follow-up work, not done in this first pass.
+        JS8Call and Packet (APRS/Direwolf) don't have their own toggle here yet — Direwolf in particular manages a
+        real audio-capture subprocess, so turning it off should also stop that cleanly, not just skip a status
+        poll (the same real work Winlink's toggle above just did for Pat). That's real, distinct follow-up work.
       </div>
     </div>
   );

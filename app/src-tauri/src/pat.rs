@@ -110,6 +110,10 @@ pub struct WinlinkStatus {
     /// instance of this survived three days with `--mycall TEST`.
     pub foreign_process: bool,
     pub raw_status: Option<Value>,
+    /// Same reasoning as `RigStatus.enabled`/`MeshStatus.enabled` -- lets
+    /// the UI say "switched off in Settings" instead of a bare "Pat isn't
+    /// responding" when it's off by choice, not a real failure.
+    pub enabled: bool,
 }
 
 fn api_get(path: &str) -> Option<Value> {
@@ -148,6 +152,14 @@ pub fn post_to_outbox(to: &str, subject: &str, body: &str) -> Result<(), String>
     }
 }
 
+/// Same real, live-checked pattern `rig::rig_enabled`/`mesh::mesh_enabled`
+/// already use.
+fn winlink_enabled(app: &AppHandle) -> bool {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().expect("db mutex poisoned");
+    db::station_profile(&conn).winlink_enabled
+}
+
 #[tauri::command]
 pub fn get_winlink_status(app: AppHandle) -> WinlinkStatus {
     let binary_found = find_pat_binary().is_some();
@@ -183,6 +195,7 @@ pub fn get_winlink_status(app: AppHandle) -> WinlinkStatus {
         api_reachable,
         foreign_process: api_reachable && !process_running,
         raw_status,
+        enabled: winlink_enabled(&app),
     }
 }
 
@@ -193,10 +206,27 @@ pub fn get_winlink_inbox() -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// Kills whatever Pat process WayStation itself is holding a handle to, if
+/// any, and waits for it to actually exit -- used when the operator
+/// switches Winlink off in Settings, so "off" really means no running
+/// process, not just a poller that stops reporting on it.
+fn stop_pat(app: &AppHandle) {
+    let state = app.state::<PatProcess>();
+    let mut guard = state.0.lock().expect("pat process mutex poisoned");
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 /// (Re)spawns the pat http process with the current station callsign.
-/// No-ops if the binary isn't found or no callsign is configured yet —
-/// callable again later once either changes, without an app restart.
+/// No-ops if Winlink is switched off, the binary isn't found, or no
+/// callsign is configured yet — callable again later once any of those
+/// changes, without an app restart.
 pub fn spawn_or_restart(app: &AppHandle) {
+    if !winlink_enabled(app) {
+        return;
+    }
     let Some(binary) = find_pat_binary() else { return };
 
     let callsign = {
@@ -249,6 +279,27 @@ pub fn restart_winlink_service(app: AppHandle) {
     spawn_or_restart(&app);
 }
 
+/// The real Winlink module toggle (Settings > Modules) -- unlike
+/// `db::set_mesh_enabled`/`set_rig_enabled`/`set_rotator_enabled`, which
+/// only ever flip a column since none of those own a subprocess, this
+/// actually stops or (re)starts the real `pat` process, so "off" is
+/// honest, not just a poller that stops reporting on a process still
+/// running in the background.
+#[tauri::command]
+pub fn set_winlink_enabled(app: AppHandle, enabled: bool) -> WinlinkStatus {
+    {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().expect("db mutex poisoned");
+        db::set_winlink_enabled_flag(&conn, enabled);
+    }
+    if enabled {
+        spawn_or_restart(&app);
+    } else {
+        stop_pat(&app);
+    }
+    get_winlink_status(app)
+}
+
 /// Reports Winlink/Pat state into `source_health` on its own cadence.
 ///
 /// Previously Pat's state was only ever computed while its panel was on
@@ -262,7 +313,9 @@ pub fn restart_winlink_service(app: AppHandle) {
 pub fn spawn_health_poller(app: AppHandle) {
     std::thread::spawn(move || loop {
         let status = get_winlink_status(app.clone());
-        let (health, detail) = if !status.binary_found {
+        let (health, detail) = if !status.enabled {
+            (Status::Degraded, Some("Switched off in Settings.".to_string()))
+        } else if !status.binary_found {
             (Status::Down, Some("Pat isn't installed. Install it to enable Winlink.".to_string()))
         } else if !status.callsign_configured {
             (Status::Down, Some("Set your callsign in Settings to enable Winlink.".to_string()))

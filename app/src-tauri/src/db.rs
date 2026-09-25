@@ -120,6 +120,13 @@ pub struct StationProfile {
     /// 2026-09-25), via its own `set_mesh_enabled` command, same
     /// instant-apply pattern as `tactical_mode`.
     pub mesh_enabled: bool,
+    /// Whether Pat (Winlink) should even run. Unlike `mesh_enabled`/
+    /// `rig_enabled`/`rotator_enabled` -- a live TCP client with nothing
+    /// to actually stop when "off" -- Pat is a real subprocess WayStation
+    /// launches and owns, so this flag's own setter (`pat::set_winlink_enabled`,
+    /// not a plain DB write) actually kills or (re)spawns the process, not
+    /// just flips this column. See `pat.rs`.
+    pub winlink_enabled: bool,
     pub updated_at: Option<String>,
 }
 
@@ -156,6 +163,7 @@ impl Default for StationProfile {
             signing_secret: None,
             theme: "dark".to_string(),
             mesh_enabled: true,
+            winlink_enabled: true,
             updated_at: None,
         }
     }
@@ -163,7 +171,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, winlink_enabled, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -187,7 +195,8 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 direwolf_audio_device: row.get(17)?,
                 citadel_vault_token: row.get(18)?,
                 mesh_enabled: row.get::<_, i64>(19)? != 0,
-                updated_at: row.get(20)?,
+                winlink_enabled: row.get::<_, i64>(20)? != 0,
+                updated_at: row.get(21)?,
             })
         },
     )
@@ -282,6 +291,33 @@ pub fn set_mesh_enabled(db: State<Db>, enabled: bool) -> StationProfile {
     station_profile(&conn)
 }
 
+/// Deliberately NOT a `#[tauri::command]` -- unlike `set_mesh_enabled` above,
+/// flipping this column alone would be dishonest: Pat is a real subprocess,
+/// not a live TCP client with nothing to stop, so the actual command the
+/// frontend calls (`pat::set_winlink_enabled`) does this DB write *and*
+/// kills or (re)spawns the process, and lives in pat.rs where `PatProcess`
+/// state is. This plain function is that command's one DB-writing step.
+pub fn set_winlink_enabled_flag(conn: &Connection, enabled: bool) -> StationProfile {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET winlink_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update winlink_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, winlink_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for winlink_enabled");
+    }
+    station_profile(&conn)
+}
+
 /// Same reasoning as `set_mesh_enabled` above -- lets the "Modules" panel
 /// toggle rig control instantly. The existing Station form's `rig_enabled`
 /// checkbox (saved via `save_station_profile`) is untouched and keeps
@@ -369,6 +405,7 @@ fn save_station_profile_conn(
     let signing_secret = existing.signing_secret;
     let theme = existing.theme;
     let mesh_enabled = existing.mesh_enabled;
+    let winlink_enabled = existing.winlink_enabled;
     conn.execute(
         "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, citadel_vault_token, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, updated_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
@@ -414,6 +451,7 @@ fn save_station_profile_conn(
         signing_secret,
         theme,
         mesh_enabled,
+        winlink_enabled,
         updated_at: Some(now),
     }
 }
@@ -4775,6 +4813,17 @@ const MIGRATIONS: &[&str] = &[
     // upgrade.
     r#"
     ALTER TABLE station_profile ADD COLUMN mesh_enabled INTEGER NOT NULL DEFAULT 1;
+    "#,
+    // v54: winlink_enabled, decided 2026-09-25 -- second module in
+    // WayStation's own modularization work (Mesh/Rig/Rotator, migration
+    // v53, were the first). Pat is a real subprocess WayStation launches
+    // and owns (unlike Mesh/Rig/Rotator, which are all just live TCP
+    // clients with nothing of their own to stop) -- see pat.rs's
+    // set_winlink_enabled for the real kill/spawn logic this flag alone
+    // doesn't provide. DEFAULT 1 for the same reason mesh_enabled's own
+    // comment gives: existing installs already run Pat today.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN winlink_enabled INTEGER NOT NULL DEFAULT 1;
     "#,
 ];
 
