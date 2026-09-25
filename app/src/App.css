@@ -6,12 +6,16 @@
    as Citadel, sharing one visual identity across the suite mattered more
    than the original standalone look. Dark theme's bg/panel/border/text/
    accent values below are Citadel's own actual hex values, taken directly
-   from `cockpit/index.html`'s `:root` — not approximated. Green is
-   deliberately gone as a rendered color (every former `--green` usage now
-   resolves to the same blue as the brand accent) while red and white/near-
-   white text are unchanged in spirit, per that same instruction. The
-   original hams'-feedback rationale for the amber/green look is worth
-   remembering if this ever needs revisiting, not erased by this note.
+   from `cockpit/index.html`'s `:root` — not approximated. Brand chrome
+   (background/panel/border/primary accent) is now blue, matching Citadel;
+   `--green` as a *status* color (see below) is corrected back to a real
+   green after an initial pass wrongly folded it into the brand change —
+   the ecosystem's own canonical `brand/PALETTE.md` explicitly marks status
+   colors as functional, not brand, and states they don't move with a
+   rebrand. Red and white/near-white text are unchanged in spirit, per that
+   same instruction. The original hams'-feedback rationale for the amber/
+   green look is worth remembering if this ever needs revisiting, not
+   erased by this note.
 
    Revisited 2026-09-05: real theme selection added after all, per operator
    request and against that original single-theme call — two real needs
@@ -30,15 +34,15 @@
    there, `--green` included, is already a shade of red) and mixing in a
    literal blue would defeat the one thing that theme exists for.
 
-   Status-tier colors (originally green=good/quiet, amber=caution/moderate,
+   Status-tier colors (green=good/quiet, amber=caution/moderate,
    red=danger/severe) are semantic and reused everywhere — alerts, net
    roster, message precedence, space weather, freshness — for a
-   consistent "read the color, not the text" command-center feel. As of
-   2026-09-24 the "good/quiet" tier renders in blue, not green, in both the
-   dark and light themes (see `--green` in each below) — the semantic
-   meaning and every call site are unchanged, only the rendered hue moved.
-   In the red theme specifically, that same semantic meaning is preserved
-   through brightness/saturation instead of hue, since hue can't vary there.
+   consistent "read the color, not the text" command-center feel, and
+   stay green/amber/red regardless of the 2026-09-24 brand rebrand above,
+   per the ecosystem's own canonical `brand/PALETTE.md`: status colors are
+   functional, not brand, and don't change with it. In the red theme
+   specifically, that same semantic meaning is preserved through
+   brightness/saturation instead of hue, since hue can't vary there.
    ========================================================================== */
 
 :root {
@@ -72,12 +76,19 @@
 
   /* Accent palette — amber/red already matched Citadel's own values almost
      exactly and are unchanged; blue is now Citadel's literal brand accent
-     (#008dff); green is deliberately gone as a rendered color and resolves
-     to that same blue (every var(--green) call site is unchanged, only the
-     hue is) */
+     (#008dff). --green corrected 2026-09-24 (second pass): the ecosystem's
+     own canonical design system (citadel-ecosystem/brand/PALETTE.md,
+     written 2026-09-18 during Citadel's own real conversion) explicitly
+     marks status colors -- green="OK/online/healthy/connected" included --
+     as functional, NOT part of the brand palette, and states they never
+     change with a rebrand. An earlier pass here wrongly folded status
+     green into the brand-blue change; reverted to the ecosystem's own
+     real canonical green (#59d67c, PALETTE.md's own value, not just
+     WayStation's prior one) so "good/connected" means the same color here
+     as it does in Citadel itself. */
   --amber: #ffb000;
   --amber-dim: #b8860b;
-  --green: #008dff;
+  --green: #59d67c;
   --gold: #e8b93f;
   --red: #e05252;
   --purple: #c77dff;
@@ -114,9 +125,11 @@
 
   --amber: #b8720a;
   --amber-dim: #8a5a08;
-  /* Green retired 2026-09-24 along with the dark theme's — resolves to
-     this theme's own existing blue rather than a newly invented hex. */
-  --green: #2f74b8;
+  /* Corrected 2026-09-24 (second pass), same reasoning as the dark theme
+     above: status colors are functional per the ecosystem's own canonical
+     PALETTE.md and don't follow a brand rebrand. Restored to this theme's
+     original green rather than the brand's light-mode blue. */
+  --green: #1f9d52;
   --gold: #a98416;
   --red: #c22326;
   --purple: #8e4fd1;
@@ -416,9 +429,9 @@ body {
 .time-bar strong {
   font-size: 0.95rem;
   color: var(--green);
-  /* Glow retinted 2026-09-24 alongside --green -- was a hardcoded green
-     (rgba of the old #39d97a) that didn't follow the variable's new blue. */
-  text-shadow: 0 0 6px rgba(0, 141, 255, 0.35);
+  /* Glow reverted 2026-09-24 (second pass) alongside --green itself --
+     matches the canonical status green (#59d67c), not the brand blue. */
+  text-shadow: 0 0 6px rgba(89, 214, 124, 0.35);
 }
 
 .panel-grid {
@@ -2893,8 +2906,8 @@ select {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: var(--green);
-  /* Glow retinted 2026-09-24 alongside --green -- see .time-bar strong above. */
-  text-shadow: 0 0 8px rgba(0, 141, 255, 0.35);
+  /* Glow reverted 2026-09-24 (second pass) -- see .time-bar strong above. */
+  text-shadow: 0 0 8px rgba(89, 214, 124, 0.35);
 }
 
 .rig-unit {
