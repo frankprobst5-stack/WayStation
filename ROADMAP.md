@@ -533,6 +533,32 @@ After the exercise or incident, WayStation exports the communications log, messa
   poll like Mesh/Rig/Rotator's simpler TCP-client-only integrations could. That's real,
   distinct follow-up work. 147 Rust tests passing (no regressions), clean TypeScript build,
   clean release build.
+- **2026-09-25 (WayStation modularization, second module: Winlink (Pat) — actually stops the
+  process)** — Named as real, explicit follow-up work in the v1 entry below: Pat is a real
+  subprocess WayStation launches and owns, unlike Mesh/Rig/Rotator's live-TCP-client-with-
+  nothing-to-stop shape, so a real toggle here has to actually kill the process, not just
+  skip a status poll. Migration v54 adds `winlink_enabled` (`DEFAULT 1`, same reasoning as
+  `mesh_enabled`'s own comment). Unlike the other three toggles, the DB write alone isn't the
+  whole story: `db::set_winlink_enabled_flag` is a plain (non-command) helper, and the real
+  Tauri command — `pat::set_winlink_enabled` — lives in `pat.rs` where `PatProcess` state is,
+  and actually calls a new `stop_pat()` (a real `kill()`+`wait()` on the child, the same
+  logic `spawn_or_restart`'s own restart path already used) or `spawn_or_restart()` depending
+  on the new value. `spawn_or_restart` itself now checks the flag first and no-ops if off,
+  which means the existing startup call in `lib.rs` and the "Restart Service" button both
+  honor it for free, no extra call sites needed. `get_winlink_status` gained an `enabled`
+  field (matching `RigStatus.enabled`) so the UI says "switched off in Settings" instead of a
+  confusing "Pat isn't responding." Added to `ModulesPanel.tsx` (`requiresHardware: false` —
+  Pat can run purely over Telnet/internet, no radio needed at all) and `MessagingPanel.tsx`
+  now hides the "Winlink" tab when off, same convention Mesh's tab already uses. 147 Rust
+  tests passing (no regressions), clean TypeScript build, clean release build. **Verified
+  end-to-end for real, including the part that actually matters**: killed both the app and
+  its real `pat` child, set `winlink_enabled=0` directly in the live database, relaunched the
+  app fresh, and confirmed no `pat` process was spawned at all (not just a status poll
+  skipped) — then confirmed `source_health` honestly reported "Switched off in Settings,"
+  and restored everything to on with a final clean relaunch showing the real `pat` process
+  running again. Still open: JS8Call and Packet (APRS/Direwolf) — the latter also manages a
+  real subprocess (Direwolf's own audio capture), so it needs the same real stop-the-process
+  treatment this entry just gave Pat, not the simpler flip-a-flag shape Mesh/Rig/Rotator got.
 - **2026-09-24 (real color-palette rebrand: dark theme now matches Citadel exactly)** —
   Frank's own follow-up after the 2026-09-18 entry below was corrected for
   overclaiming: "get rid of the green, keep the white and red, use the default
