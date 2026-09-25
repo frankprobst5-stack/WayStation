@@ -493,6 +493,31 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-09-25 (JS8Call and Packet (APRS/Direwolf) module toggles — all six real
+  local-hardware modules now done)** — Completes the six candidates named in the
+  2026-09-15 architecture-initiative entry below: Mesh/Rig/Rotator and Winlink shipped
+  earlier the same day, JS8Call and Packet round it out. JS8Call (migration v55,
+  `js8call_enabled`) follows Mesh's simple shape exactly — WayStation never spawns JS8Call
+  itself, so a live-checked flag is the whole story; `get_js8call_status` gained an `app:
+  AppHandle` parameter (transparent to every existing frontend call site) and an `enabled`
+  field, and its poller now skips the connect attempt entirely when off. Packet (APRS/
+  Direwolf) (migration v56, `packet_enabled`) is a real mixed case matching its own mixed
+  nature: `aprs.rs`'s live KISS-port listener gets the same simple flag treatment, but
+  Direwolf itself is a real subprocess — unlike Pat, though, it was already never
+  auto-started (a deliberate real-microphone-safety decision from when it was first built),
+  so the real new work is smaller: `direwolf::set_packet_enabled` flips the flag and, when
+  turning off, calls the existing `stop_direwolf` (reusing its own proven kill-and-wait
+  logic) in case an operator had it running; `start_direwolf` now refuses to start at all
+  while disabled. `MessagingPanel.tsx`'s tab-visibility gating was refactored from one
+  boolean per module into a small `TAB_MODULE_FIELD` map now that there are four real
+  modules to gate. 147 Rust tests passing (no regressions), clean TypeScript build, clean
+  release build. Verified end-to-end for real: rebuilt and relaunched the app, confirmed
+  all six modules default correctly on migration, toggled `js8call_enabled`/
+  `packet_enabled` off directly in the live database and confirmed both real pollers
+  reported "Switched off in Settings" within one cycle rather than attempting a real
+  connection, then restored both and confirmed they resumed real, honest polling (real
+  "Connection refused"/"isn't reachable" errors, since neither Direwolf nor JS8Call is
+  actually running in this environment).
 - **2026-09-25 (WayStation's own modularization work starts for real — v1: Mesh, Rig,
   Rotator)** — First real application of the ecosystem-wide module-convention convergence
   resolved the same day (Citadel Ecosystem `ARCHITECTURE.md`'s "Module conventions" section),
