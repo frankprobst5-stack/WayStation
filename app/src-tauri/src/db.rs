@@ -1692,6 +1692,83 @@ pub fn replace_spc_outlook(conn: &mut Connection, source: &str, fetched_at: &str
     tx.commit().expect("failed to commit spc_outlook transaction");
 }
 
+/// Real current conditions from the nearest official NWS-reporting station
+/// (mostly airport METAR sensors) -- a fallback/comparison to
+/// `LocalWeatherObservation` that works for every operator, not just the
+/// ones who own a physical console. Singleton row (id=1), same reasoning as
+/// that struct: "the current reading from the nearest station," not a
+/// history. Fields normalized to US-customary units regardless of NWS's own
+/// SI reporting units for this endpoint.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct NwsCurrentObservation {
+    pub fetched_at: Option<String>,
+    pub station_id: Option<String>,
+    pub station_name: Option<String>,
+    pub observed_at: Option<String>,
+    pub text_description: Option<String>,
+    pub temperature_f: Option<f64>,
+    pub dewpoint_f: Option<f64>,
+    pub relative_humidity_pct: Option<f64>,
+    pub wind_direction_deg: Option<f64>,
+    pub wind_speed_mph: Option<f64>,
+    pub wind_gust_mph: Option<f64>,
+    pub barometric_pressure_inhg: Option<f64>,
+    pub visibility_mi: Option<f64>,
+}
+
+#[tauri::command]
+pub fn get_nws_current_observation(db: State<Db>) -> NwsCurrentObservation {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    conn.query_row(
+        "SELECT fetched_at, station_id, station_name, observed_at, text_description, temperature_f,
+                dewpoint_f, relative_humidity_pct, wind_direction_deg, wind_speed_mph, wind_gust_mph,
+                barometric_pressure_inhg, visibility_mi
+         FROM nws_current_observation WHERE id = 1",
+        [],
+        |row| {
+            Ok(NwsCurrentObservation {
+                fetched_at: row.get(0)?,
+                station_id: row.get(1)?,
+                station_name: row.get(2)?,
+                observed_at: row.get(3)?,
+                text_description: row.get(4)?,
+                temperature_f: row.get(5)?,
+                dewpoint_f: row.get(6)?,
+                relative_humidity_pct: row.get(7)?,
+                wind_direction_deg: row.get(8)?,
+                wind_speed_mph: row.get(9)?,
+                wind_gust_mph: row.get(10)?,
+                barometric_pressure_inhg: row.get(11)?,
+                visibility_mi: row.get(12)?,
+            })
+        },
+    )
+    .optional()
+    .expect("failed to query nws_current_observation")
+    .unwrap_or_default()
+}
+
+pub fn save_nws_current_observation(conn: &Connection, source: &str, fetched_at: &str, obs: &NwsCurrentObservation) {
+    conn.execute(
+        "INSERT INTO nws_current_observation (id, source, fetched_at, via, station_id, station_name, observed_at,
+            text_description, temperature_f, dewpoint_f, relative_humidity_pct, wind_direction_deg, wind_speed_mph,
+            wind_gust_mph, barometric_pressure_inhg, visibility_mi)
+         VALUES (1, ?1, ?2, 'internet', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(id) DO UPDATE SET
+            source = excluded.source, fetched_at = excluded.fetched_at, station_id = excluded.station_id,
+            station_name = excluded.station_name, observed_at = excluded.observed_at,
+            text_description = excluded.text_description, temperature_f = excluded.temperature_f,
+            dewpoint_f = excluded.dewpoint_f, relative_humidity_pct = excluded.relative_humidity_pct,
+            wind_direction_deg = excluded.wind_direction_deg, wind_speed_mph = excluded.wind_speed_mph,
+            wind_gust_mph = excluded.wind_gust_mph, barometric_pressure_inhg = excluded.barometric_pressure_inhg,
+            visibility_mi = excluded.visibility_mi",
+        params![source, fetched_at, obs.station_id, obs.station_name, obs.observed_at, obs.text_description,
+            obs.temperature_f, obs.dewpoint_f, obs.relative_humidity_pct, obs.wind_direction_deg,
+            obs.wind_speed_mph, obs.wind_gust_mph, obs.barometric_pressure_inhg, obs.visibility_mi],
+    )
+    .expect("failed to save nws_current_observation");
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct NetRosterEntry {
     pub id: i64,
@@ -4557,6 +4634,40 @@ const MIGRATIONS: &[&str] = &[
         expire     TEXT,
         issue      TEXT,
         geometry_json TEXT NOT NULL
+    );
+    "#,
+    // v52: NWS current observations, decided 2026-09-25 -- fourth and
+    // final of the four real NWS map products named in the same
+    // 2026-09-16 field request. Real current conditions from the nearest
+    // official NWS-reporting station (airport METAR sensors, mostly) --
+    // a fallback/comparison to LocalWeatherObservation above that works
+    // for every operator, not just the ones who own a physical console.
+    // Singleton row (id=1), same reasoning as local_weather_observation:
+    // "the current reading from the nearest station," not a history.
+    // Fields normalized to US-customary units (F/mph/inHg/mi) regardless
+    // of the source's own SI reporting units (verified live: NWS's
+    // observations endpoint has no `units=us` param -- confirmed by a
+    // real 400 "Query parameter units is not recognized" response, not
+    // assumed from older docs), matching every other weather source in
+    // this app.
+    r#"
+    CREATE TABLE nws_current_observation (
+        id                        INTEGER PRIMARY KEY,
+        source                    TEXT NOT NULL,
+        fetched_at                TEXT NOT NULL,
+        via                       TEXT NOT NULL,
+        station_id                TEXT,
+        station_name              TEXT,
+        observed_at               TEXT,
+        text_description          TEXT,
+        temperature_f             REAL,
+        dewpoint_f                REAL,
+        relative_humidity_pct     REAL,
+        wind_direction_deg        REAL,
+        wind_speed_mph            REAL,
+        wind_gust_mph             REAL,
+        barometric_pressure_inhg  REAL,
+        visibility_mi             REAL
     );
     "#,
 ];

@@ -127,6 +127,39 @@ interface SpcOutlookArea {
   geometry_json: string;
 }
 
+// Mirrors db::NwsCurrentObservation.
+interface NwsCurrentObservation {
+  fetched_at: string | null;
+  station_id: string | null;
+  station_name: string | null;
+  observed_at: string | null;
+  text_description: string | null;
+  temperature_f: number | null;
+  dewpoint_f: number | null;
+  relative_humidity_pct: number | null;
+  wind_direction_deg: number | null;
+  wind_speed_mph: number | null;
+  wind_gust_mph: number | null;
+  barometric_pressure_inhg: number | null;
+  visibility_mi: number | null;
+}
+
+function useNwsCurrentObservation() {
+  const [obs, setObs] = useState<NwsCurrentObservation | null>(null);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    async function refresh() {
+      setObs(await invoke<NwsCurrentObservation>("get_nws_current_observation"));
+    }
+    refresh();
+    listen("nws-current-observation-changed", refresh).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+  return obs;
+}
+
 function useSpcOutlook() {
   const [areas, setAreas] = useState<SpcOutlookArea[] | null>(null);
   useEffect(() => {
@@ -190,6 +223,51 @@ function CurrentConditionsCard({ obs }: { obs: LocalWeatherObservation | null })
         {obs.source === "davis_weatherlink_live" && obs.rain_rate_in_hr !== null && (
           <div className="field-hint">Rain rate assumes a standard 0.01in tipping bucket — verify for your specific collector.</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Real current conditions from the nearest official NWS-reporting
+ * station (mostly airport METAR sensors) -- added 2026-09-25, the fourth
+ * of four real NWS map products from the same field request as the radar
+ * loop/alert-polygon/SPC-outlook work above. Works for every operator,
+ * not just the ones who own a physical console like CurrentConditionsCard
+ * above needs -- a real fallback, and a real comparison point when both
+ * exist. */
+function NwsObservationCard({ obs }: { obs: NwsCurrentObservation | null }) {
+  if (!obs || !obs.station_id) {
+    return null; // Nothing fetched yet, or no grid square configured -- the forecast card below already explains that.
+  }
+
+  return (
+    <div className="sync-section">
+      <div className="sync-section-head">
+        <h3>Nearest NWS Station</h3>
+      </div>
+      <div className="bandplan-disclaimer">
+        {obs.station_name ?? obs.station_id} ({obs.station_id}), a real official NWS-reporting station near this
+        station's grid square.{" "}
+        {obs.fetched_at && <Freshness fetchedAt={obs.fetched_at} agingAfterSeconds={60 * 60} staleAfterSeconds={3 * 60 * 60} />}
+      </div>
+      <div className="alert-card">
+        <div className="alert-header">
+          <span>{obs.text_description ?? "Current Conditions"}</span>
+          {obs.temperature_f !== null && <span className="resource-chip">{obs.temperature_f.toFixed(1)}°F</span>}
+        </div>
+        <div className="alert-area">
+          {obs.dewpoint_f !== null && `Dewpoint ${obs.dewpoint_f.toFixed(1)}°F`}
+          {obs.relative_humidity_pct !== null && ` · Humidity ${obs.relative_humidity_pct.toFixed(0)}%`}
+        </div>
+        <div className="alert-area">
+          {obs.wind_speed_mph !== null && `Wind ${obs.wind_speed_mph.toFixed(1)} mph`}
+          {obs.wind_gust_mph !== null && ` (gust ${obs.wind_gust_mph.toFixed(1)})`}
+          {obs.wind_direction_deg !== null && ` @ ${obs.wind_direction_deg.toFixed(0)}°`}
+        </div>
+        <div className="alert-area">
+          {obs.barometric_pressure_inhg !== null && `Pressure ${obs.barometric_pressure_inhg.toFixed(2)} inHg`}
+          {obs.visibility_mi !== null && ` · Visibility ${obs.visibility_mi.toFixed(1)} mi`}
+        </div>
       </div>
     </div>
   );
@@ -284,11 +362,13 @@ function ForecastExcerptCard({ periods, onViewFull }: { periods: ForecastPeriod[
 
 function OverviewTab({
   obs,
+  nwsObs,
   periods,
   alerts,
   goTo,
 }: {
   obs: LocalWeatherObservation | null;
+  nwsObs: NwsCurrentObservation | null;
   periods: ForecastPeriod[];
   alerts: AlertSummary[] | null;
   goTo: (t: Tab) => void;
@@ -296,6 +376,7 @@ function OverviewTab({
   return (
     <div className="weather-overview-grid">
       <CurrentConditionsCard obs={obs} />
+      <NwsObservationCard obs={nwsObs} />
       {periods.length > 0 && (
         <div className="sync-section">
           <div className="sync-section-head">
@@ -635,6 +716,7 @@ function WeatherPanel() {
   const periods = useForecast();
   const alerts = useAlertSummaries();
   const outlook = useSpcOutlook();
+  const nwsObs = useNwsCurrentObservation();
 
   if (periods === null) {
     return <div className="panel-alerts">Loading...</div>;
@@ -657,7 +739,7 @@ function WeatherPanel() {
       </div>
 
       <div className="panel-tab-content">
-        {tab === "Overview" && <OverviewTab obs={obs} periods={periods} alerts={alerts} goTo={setTab} />}
+        {tab === "Overview" && <OverviewTab obs={obs} nwsObs={nwsObs} periods={periods} alerts={alerts} goTo={setTab} />}
         {tab === "NWS Forecast" && <NwsForecastTab periods={periods} />}
         {tab === "Alerts" && <AlertsPanel />}
         {tab === "Radar" && <RadarTab alerts={alerts} outlook={outlook} />}

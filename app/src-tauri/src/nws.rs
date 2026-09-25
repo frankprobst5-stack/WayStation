@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const SOURCE_ID: &str = "nws-alerts";
 const FORECAST_SOURCE_ID: &str = "nws-forecast";
+const CURRENT_OBS_SOURCE_ID: &str = "nws-current-observation";
 const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60); // NWS asks clients not to poll more often
 const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
@@ -151,6 +152,8 @@ struct PointsResponse {
 #[derive(Debug, Deserialize)]
 struct PointsProperties {
     forecast: String,
+    #[serde(rename = "observationStations")]
+    observation_stations: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,6 +250,155 @@ fn fetch_forecast(lat: f64, lon: f64) -> Result<Vec<IncomingForecastPeriod>, Str
     Ok(parse_forecast_periods(forecast.properties.periods))
 }
 
+#[derive(Debug, Deserialize)]
+struct StationsResponse {
+    features: Vec<StationFeature>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StationFeature {
+    properties: StationIdentity,
+}
+
+#[derive(Debug, Deserialize)]
+struct StationIdentity {
+    #[serde(rename = "stationIdentifier")]
+    station_identifier: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct Quantity {
+    value: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ObservationResponse {
+    properties: ObservationProperties,
+}
+
+#[derive(Debug, Deserialize)]
+struct ObservationProperties {
+    #[serde(rename = "stationName")]
+    station_name: Option<String>,
+    timestamp: Option<String>,
+    #[serde(rename = "textDescription")]
+    text_description: Option<String>,
+    #[serde(default)]
+    temperature: Option<Quantity>,
+    #[serde(default)]
+    dewpoint: Option<Quantity>,
+    #[serde(rename = "relativeHumidity", default)]
+    relative_humidity: Option<Quantity>,
+    #[serde(rename = "windDirection", default)]
+    wind_direction: Option<Quantity>,
+    #[serde(rename = "windSpeed", default)]
+    wind_speed: Option<Quantity>,
+    #[serde(rename = "windGust", default)]
+    wind_gust: Option<Quantity>,
+    #[serde(rename = "barometricPressure", default)]
+    barometric_pressure: Option<Quantity>,
+    #[serde(default)]
+    visibility: Option<Quantity>,
+}
+
+fn c_to_f(c: f64) -> f64 {
+    c * 9.0 / 5.0 + 32.0
+}
+fn kmh_to_mph(kmh: f64) -> f64 {
+    kmh / 1.609344
+}
+fn pa_to_inhg(pa: f64) -> f64 {
+    pa / 3386.389
+}
+fn m_to_mi(m: f64) -> f64 {
+    m / 1609.344
+}
+
+/// A real, observed case: `textDescription` frequently comes back as an
+/// empty string rather than `null` when a station has nothing to report --
+/// treated as "nothing to show," not a blank line in the UI.
+fn non_empty(s: Option<String>) -> Option<String> {
+    s.filter(|s| !s.trim().is_empty())
+}
+
+/// Pure so the real unit conversions (NWS's observations endpoint always
+/// reports SI regardless of Accept headers -- verified live: a real
+/// `?units=us` request comes back a 400 "Query parameter units is not
+/// recognized", not honored) are directly testable against a real captured
+/// shape, same reasoning every other parse function in this file is its
+/// own function.
+fn parse_current_observation(station_id: String, props: ObservationProperties) -> db::NwsCurrentObservation {
+    db::NwsCurrentObservation {
+        fetched_at: None, // set by the caller at save time
+        station_id: Some(station_id),
+        station_name: props.station_name,
+        observed_at: props.timestamp,
+        text_description: non_empty(props.text_description),
+        temperature_f: props.temperature.and_then(|q| q.value).map(c_to_f),
+        dewpoint_f: props.dewpoint.and_then(|q| q.value).map(c_to_f),
+        relative_humidity_pct: props.relative_humidity.and_then(|q| q.value),
+        wind_direction_deg: props.wind_direction.and_then(|q| q.value),
+        wind_speed_mph: props.wind_speed.and_then(|q| q.value).map(kmh_to_mph),
+        wind_gust_mph: props.wind_gust.and_then(|q| q.value).map(kmh_to_mph),
+        barometric_pressure_inhg: props.barometric_pressure.and_then(|q| q.value).map(pa_to_inhg),
+        visibility_mi: props.visibility.and_then(|q| q.value).map(m_to_mi),
+    }
+}
+
+/// Same real two-step points lookup as `fetch_forecast`, then a third real
+/// step verified live: `/points/` hands back an `observationStations` URL
+/// (a list of nearby stations ordered nearest-first, per NWS's own docs),
+/// and the nearest one's `/observations/latest` is the real current
+/// conditions -- mostly airport METAR sensors, not a WayStation-run sensor.
+fn fetch_current_observation(lat: f64, lon: f64) -> Result<db::NwsCurrentObservation, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let points_url = format!("https://api.weather.gov/points/{lat:.4},{lon:.4}");
+    let points: PointsResponse = client
+        .get(&points_url)
+        .header("Accept", "application/geo+json")
+        .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+
+    let stations: StationsResponse = client
+        .get(&points.properties.observation_stations)
+        .header("Accept", "application/geo+json")
+        .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+
+    let station_id = stations
+        .features
+        .into_iter()
+        .next()
+        .map(|f| f.properties.station_identifier)
+        .ok_or_else(|| "no observation stations found near this location".to_string())?;
+
+    let obs_url = format!("https://api.weather.gov/stations/{station_id}/observations/latest");
+    let obs: ObservationResponse = client
+        .get(&obs_url)
+        .header("Accept", "application/geo+json")
+        .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+
+    Ok(parse_current_observation(station_id, obs.properties))
+}
+
 /// Same shared/on-demand shape as `poll_once` -- called by both the
 /// background poller and `readiness.rs`'s "Prepare for Offline."
 pub fn poll_once_forecast(app: &AppHandle) {
@@ -277,6 +429,35 @@ pub fn poll_once_forecast(app: &AppHandle) {
     }
 }
 
+/// Same shared/on-demand shape as `poll_once_forecast`.
+pub fn poll_once_current_observation(app: &AppHandle) {
+    let point = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().expect("db mutex poisoned");
+        db::station_profile(&conn).grid_square.and_then(|g| grid_square_to_lat_lon(&g))
+    };
+
+    if let Some((lat, lon)) = point {
+        match fetch_current_observation(lat, lon) {
+            Ok(obs) => {
+                let fetched_at = Utc::now().to_rfc3339();
+                {
+                    let db = app.state::<Db>();
+                    let conn = db.0.lock().expect("db mutex poisoned");
+                    db::save_nws_current_observation(&conn, CURRENT_OBS_SOURCE_ID, &fetched_at, &obs);
+                    connectivity::report_source_health(&conn, CURRENT_OBS_SOURCE_ID, "NWS Current Observations", Status::Healthy, Via::Internet, None);
+                }
+                let _ = app.emit("nws-current-observation-changed", ());
+            }
+            Err(detail) => {
+                let db = app.state::<Db>();
+                let conn = db.0.lock().expect("db mutex poisoned");
+                connectivity::report_source_health(&conn, CURRENT_OBS_SOURCE_ID, "NWS Current Observations", Status::Down, Via::Internet, Some(&detail));
+            }
+        }
+    }
+}
+
 pub fn spawn_poller(app: AppHandle) {
     std::thread::spawn(move || loop {
         if !connectivity::paused_for_offline(&app, SOURCE_ID, "NWS Active Alerts") {
@@ -284,6 +465,9 @@ pub fn spawn_poller(app: AppHandle) {
         }
         if !connectivity::paused_for_offline(&app, FORECAST_SOURCE_ID, "NWS Forecast") {
             poll_once_forecast(&app);
+        }
+        if !connectivity::paused_for_offline(&app, CURRENT_OBS_SOURCE_ID, "NWS Current Observations") {
+            poll_once_current_observation(&app);
         }
         std::thread::sleep(POLL_INTERVAL);
     });
@@ -350,6 +534,49 @@ mod tests {
         let parsed = parse_alert_features(vec![feature]);
         assert_eq!(parsed[0].event, "Dense Fog Advisory");
         assert!(parsed[0].geometry_json.is_none());
+    }
+
+    // Captured live, 2026-09-25, from a real
+    // `GET https://api.weather.gov/stations/KOKC/observations/latest`
+    // request -- not hand-invented. dewpoint/windGust/relativeHumidity are
+    // genuinely null in the real response, not trimmed out for the test;
+    // textDescription is a real empty string, not null, the same "reports
+    // nothing" shape NWS actually sends.
+    const REAL_CAPTURED_OBSERVATION: &str = r#"{
+        "stationName": "Oklahoma City, Will Rogers World Airport",
+        "timestamp": "2026-09-25T17:50:00+00:00",
+        "textDescription": "",
+        "temperature": {"unitCode": "wmoUnit:degC", "value": 28, "qualityControl": "V"},
+        "dewpoint": {"unitCode": "wmoUnit:degC", "value": null, "qualityControl": "Z"},
+        "windDirection": {"unitCode": "wmoUnit:degree_(angle)", "value": 190, "qualityControl": "V"},
+        "windSpeed": {"unitCode": "wmoUnit:km_h-1", "value": 14.832, "qualityControl": "V"},
+        "windGust": {"unitCode": "wmoUnit:km_h-1", "value": null, "qualityControl": "Z"},
+        "barometricPressure": {"unitCode": "wmoUnit:Pa", "value": 102031.89, "qualityControl": "V"},
+        "visibility": {"unitCode": "wmoUnit:m", "value": 16093.44, "qualityControl": "C"},
+        "relativeHumidity": {"unitCode": "wmoUnit:percent", "value": null, "qualityControl": "V"}
+    }"#;
+
+    fn assert_close(actual: f64, expected: f64, label: &str) {
+        assert!((actual - expected).abs() < 0.01, "{label}: expected {expected}, got {actual}");
+    }
+
+    #[test]
+    fn parse_current_observation_converts_a_real_captured_shape_to_us_units() {
+        let props: ObservationProperties = serde_json::from_str(REAL_CAPTURED_OBSERVATION).unwrap();
+        let obs = parse_current_observation("KOKC".to_string(), props);
+        assert_eq!(obs.station_id.as_deref(), Some("KOKC"));
+        assert_eq!(obs.station_name.as_deref(), Some("Oklahoma City, Will Rogers World Airport"));
+        assert_close(obs.temperature_f.unwrap(), 82.4, "temperature");
+        assert_close(obs.wind_speed_mph.unwrap(), 9.218, "wind speed");
+        assert_close(obs.barometric_pressure_inhg.unwrap(), 30.129, "barometric pressure");
+        assert_close(obs.visibility_mi.unwrap(), 10.0, "visibility");
+        // Genuinely absent real values must stay absent, not become 0/NaN.
+        assert!(obs.dewpoint_f.is_none());
+        assert!(obs.wind_gust_mph.is_none());
+        assert!(obs.relative_humidity_pct.is_none());
+        // A real empty-string textDescription must read as "nothing to
+        // show," not a blank line in the UI.
+        assert!(obs.text_description.is_none());
     }
 
     #[test]
