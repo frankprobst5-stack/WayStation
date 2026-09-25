@@ -47,6 +47,11 @@ interface AlertSummary {
   severity: string;
   area_desc: string | null;
   expires: string | null;
+  // Real GeoJSON geometry (Polygon/MultiPolygon), as a JSON string -- null
+  // when NWS issued this alert by zone/state with no drawn shape. Added
+  // 2026-09-25 for the Radar tab's warning-polygon overlay below; unused
+  // by the plain text alert cards elsewhere on this page.
+  geometry_json: string | null;
 }
 
 const BRAND_LABELS: Record<string, string> = {
@@ -324,12 +329,51 @@ function StationsTab({ obs }: { obs: LocalWeatherObservation | null }) {
 
 const RADAR_FRAME_INTERVAL_MS = 500;
 
+const ALERT_SOURCE_ID = "nws-alert-polygons";
+const ALERT_FILL_LAYER_ID = "nws-alert-polygons-fill";
+const ALERT_LINE_LAYER_ID = "nws-alert-polygons-line";
+
+// Matches this app's existing severity color convention (App.css's
+// .alert-card.severity-* rules) -- hardcoded hex rather than CSS vars
+// since MapLibre paint expressions can't read custom properties, same
+// approach every other hardcoded map-marker color in this app already uses.
+const SEVERITY_COLOR: Record<string, string> = {
+  Extreme: "#c77dff",
+  Severe: "#e05252",
+  Moderate: "#ffb000",
+  Minor: "#e8b93f",
+  Unknown: "#5b7386",
+};
+
+function alertsToGeoJson(alerts: AlertSummary[]): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const a of alerts) {
+    if (!a.geometry_json) continue;
+    try {
+      features.push({
+        type: "Feature",
+        geometry: JSON.parse(a.geometry_json),
+        properties: { id: a.id, event: a.event, severity: a.severity, expires: a.expires },
+      });
+    } catch {
+      // A real alert with malformed stored geometry shouldn't take the
+      // whole overlay down -- skip just that one shape.
+    }
+  }
+  return { type: "FeatureCollection", features };
+}
+
 /** Lightweight reuse of the Tactical Map's own citadel/online style
  * resolution and RainViewer overlay -- deliberately not a second radar
  * integration, no incident markers or pin tools, just a base map plus
  * the same live composite radar layer, now animated over RainViewer's
- * own recent-frame history instead of showing only the single latest one. */
-function RadarTab() {
+ * own recent-frame history instead of showing only the single latest one.
+ * Also draws real NWS watch/warning polygons (added 2026-09-25, a field
+ * request from a storm-chaser tester) using the same alert data already
+ * fetched for the Alerts tab -- no second fetch, no third-party WMS
+ * overlay, just the geometry api.weather.gov was already sending and this
+ * app was already discarding. */
+function RadarTab({ alerts }: { alerts: AlertSummary[] | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [tileSource, setTileSource] = useState<"citadel" | "online" | null>(null);
@@ -367,6 +411,37 @@ function RadarTab() {
         setFrameIndex(lastIndex);
         map.addSource(RADAR_SOURCE_ID, { type: "raster", tiles: [seq[lastIndex].tileTemplate], tileSize: 256 });
         map.addLayer({ id: RADAR_LAYER_ID, type: "raster", source: RADAR_SOURCE_ID, paint: { "raster-opacity": 0.7 } });
+
+        map.addSource(ALERT_SOURCE_ID, { type: "geojson", data: alertsToGeoJson(alerts ?? []) });
+        map.addLayer({
+          id: ALERT_FILL_LAYER_ID,
+          type: "fill",
+          source: ALERT_SOURCE_ID,
+          paint: {
+            "fill-color": ["match", ["get", "severity"], "Extreme", SEVERITY_COLOR.Extreme, "Severe", SEVERITY_COLOR.Severe, "Moderate", SEVERITY_COLOR.Moderate, "Minor", SEVERITY_COLOR.Minor, SEVERITY_COLOR.Unknown],
+            "fill-opacity": 0.25,
+          },
+        });
+        map.addLayer({
+          id: ALERT_LINE_LAYER_ID,
+          type: "line",
+          source: ALERT_SOURCE_ID,
+          paint: {
+            "line-color": ["match", ["get", "severity"], "Extreme", SEVERITY_COLOR.Extreme, "Severe", SEVERITY_COLOR.Severe, "Moderate", SEVERITY_COLOR.Moderate, "Minor", SEVERITY_COLOR.Minor, SEVERITY_COLOR.Unknown],
+            "line-width": 2,
+          },
+        });
+        map.on("click", ALERT_FILL_LAYER_ID, (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const expires = f.properties?.expires ? new Date(f.properties.expires).toLocaleString() : "unknown";
+          new maplibregl.Popup({ offset: 8 })
+            .setLngLat(e.lngLat)
+            .setHTML(`<strong>${f.properties?.event ?? "Alert"}</strong><br/>Expires ${expires}`)
+            .addTo(map);
+        });
+        map.on("mouseenter", ALERT_FILL_LAYER_ID, () => (map.getCanvas().style.cursor = "pointer"));
+        map.on("mouseleave", ALERT_FILL_LAYER_ID, () => (map.getCanvas().style.cursor = ""));
       });
     }
 
@@ -395,6 +470,16 @@ function RadarTab() {
     source?.setTiles([frames[frameIndex].tileTemplate]);
   }, [frames, frameIndex]);
 
+  // Keep the warning-polygon overlay in sync as alerts arrive/change --
+  // useAlertSummaries() polls independently of this map's own lifecycle,
+  // so this can't just be set once at map init.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource(ALERT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(alertsToGeoJson(alerts ?? []));
+  }, [alerts]);
+
   const currentFrameTime =
     frames && frames[frameIndex]
       ? new Date(frames[frameIndex].time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -404,11 +489,21 @@ function RadarTab() {
     <div>
       <div className="bandplan-disclaimer">
         Live composite radar from RainViewer (free, no key) — an animated loop over its real recent-frame history
-        (typically the last ~2 hours). This is RainViewer's own radar mosaic, not a direct NWS NEXRAD feed. Needs
-        internet; there's no offline radar source.
+        (typically the last ~2 hours) — plus real NWS watch/warning polygons for this station's area, shaded by
+        severity and clickable for details. This is RainViewer's own radar mosaic, not a direct NWS NEXRAD feed.
+        Needs internet; there's no offline radar source.
       </div>
       {radarError && <div className="panel-alerts-empty tactical-map-error">{radarError}</div>}
       <div ref={containerRef} className="tactical-map-canvas weather-radar-canvas" />
+      {alerts && alerts.some((a) => a.geometry_json) && (
+        <div className="tactical-map-legend">
+          {Object.entries(SEVERITY_COLOR).map(([severity, color]) => (
+            <span key={severity}>
+              <span className="tactical-map-swatch" style={{ background: color }} /> {severity}
+            </span>
+          ))}
+        </div>
+      )}
       {frames && frames.length > 1 && (
         <div className="weather-radar-controls">
           <button type="button" className="weather-link-btn" onClick={() => setPlaying((p) => !p)}>
@@ -463,7 +558,7 @@ function WeatherPanel() {
         {tab === "Overview" && <OverviewTab obs={obs} periods={periods} alerts={alerts} goTo={setTab} />}
         {tab === "NWS Forecast" && <NwsForecastTab periods={periods} />}
         {tab === "Alerts" && <AlertsPanel />}
-        {tab === "Radar" && <RadarTab />}
+        {tab === "Radar" && <RadarTab alerts={alerts} />}
         {tab === "Stations" && <StationsTab obs={obs} />}
       </div>
     </div>

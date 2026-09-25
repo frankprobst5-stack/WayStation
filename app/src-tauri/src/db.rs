@@ -1522,6 +1522,11 @@ pub struct Alert {
     pub area_desc: Option<String>,
     pub effective: Option<String>,
     pub expires: Option<String>,
+    /// Raw GeoJSON geometry (Polygon/MultiPolygon), as a JSON string --
+    /// `None` when NWS issued this alert by zone/state with no drawn
+    /// shape. Parsed on the frontend, not here, since this is passed
+    /// straight through to a MapLibre GeoJSON source either way.
+    pub geometry_json: Option<String>,
 }
 
 #[tauri::command]
@@ -1529,7 +1534,7 @@ pub fn get_alerts(db: State<Db>) -> Vec<Alert> {
     let conn = db.0.lock().expect("db mutex poisoned");
     let mut stmt = conn
         .prepare(
-            "SELECT id, fetched_at, event, severity, headline, description, area_desc, effective, expires
+            "SELECT id, fetched_at, event, severity, headline, description, area_desc, effective, expires, geometry_json
              FROM alerts ORDER BY effective DESC",
         )
         .expect("failed to prepare alerts query");
@@ -1544,6 +1549,7 @@ pub fn get_alerts(db: State<Db>) -> Vec<Alert> {
             area_desc: row.get(6)?,
             effective: row.get(7)?,
             expires: row.get(8)?,
+            geometry_json: row.get(9)?,
         })
     })
     .expect("failed to query alerts")
@@ -1566,6 +1572,7 @@ pub struct IncomingAlert {
     pub effective: Option<String>,
     pub expires: Option<String>,
     pub raw_json: String,
+    pub geometry_json: Option<String>,
 }
 
 pub fn replace_alerts(conn: &mut Connection, source: &str, fetched_at: &str, alerts: &[IncomingAlert]) {
@@ -1586,8 +1593,8 @@ pub fn replace_alerts(conn: &mut Connection, source: &str, fetched_at: &str, ale
 
         for a in alerts {
             tx.execute(
-                "INSERT INTO alerts (id, source, fetched_at, via, event, severity, headline, description, area_desc, effective, expires, raw_json)
-                 VALUES (?1, ?2, ?3, 'internet', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                "INSERT INTO alerts (id, source, fetched_at, via, event, severity, headline, description, area_desc, effective, expires, raw_json, geometry_json)
+                 VALUES (?1, ?2, ?3, 'internet', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(id) DO UPDATE SET
                     fetched_at = excluded.fetched_at,
                     event = excluded.event,
@@ -1597,8 +1604,9 @@ pub fn replace_alerts(conn: &mut Connection, source: &str, fetched_at: &str, ale
                     area_desc = excluded.area_desc,
                     effective = excluded.effective,
                     expires = excluded.expires,
-                    raw_json = excluded.raw_json",
-                params![a.id, source, fetched_at, a.event, a.severity, a.headline, a.description, a.area_desc, a.effective, a.expires, a.raw_json],
+                    raw_json = excluded.raw_json,
+                    geometry_json = excluded.geometry_json",
+                params![a.id, source, fetched_at, a.event, a.severity, a.headline, a.description, a.area_desc, a.effective, a.expires, a.raw_json, a.geometry_json],
             )
             .expect("failed to upsert alert");
         }
@@ -4430,6 +4438,20 @@ const MIGRATIONS: &[&str] = &[
     // same reasoning as repeaterbook_token.
     r#"
     ALTER TABLE station_profile ADD COLUMN citadel_vault_token TEXT;
+    "#,
+    // v50: alert polygon geometry, decided 2026-09-25 -- real field request
+    // from a storm-chaser tester (2026-09-16, this project's own
+    // ROADMAP.md) for more NWS map resources. nws.rs's alert fetch always
+    // discarded each GeoJSON feature's own `geometry` (Polygon/
+    // MultiPolygon), keeping only `properties` -- this column stores that
+    // geometry as-fetched (a raw GeoJSON geometry object, serialized to
+    // text) so the map can draw the real warning/watch shape instead of
+    // just the point-based text alert already shown on the Alerts tab.
+    // Nullable: some real NWS alerts (issued by state/zone rather than a
+    // drawn polygon) genuinely have a null geometry, which must render as
+    // "no shape for this one" rather than a parse failure.
+    r#"
+    ALTER TABLE alerts ADD COLUMN geometry_json TEXT;
     "#,
 ];
 

@@ -3,10 +3,10 @@
 //! Deliberately blocking + std::thread, matching connectivity.rs's poller,
 //! rather than pulling in an async runtime for a second concurrency model.
 //!
-//! Polygons aren't fetched yet — this is text-only (event, severity,
-//! headline, description, area, effective/expires). Drawing alert polygons
-//! on WorldMapPanel is a natural follow-up, not required for the first
-//! usable version of this feature.
+//! Alert polygons (added 2026-09-25, real field request from a storm-chaser
+//! tester -- see this project's own ROADMAP.md) are captured from each
+//! GeoJSON feature's own `geometry`, stored verbatim, and drawn on
+//! WeatherPanel's Radar tab -- see `db.rs`'s `alerts.geometry_json` column.
 
 use crate::connectivity::{self, Status, Via};
 use crate::db::{self, Db, IncomingAlert, IncomingForecastPeriod};
@@ -30,6 +30,11 @@ struct AlertsResponse {
 struct AlertFeature {
     id: String,
     properties: AlertProperties,
+    /// A real NWS alert issued by zone/state rather than a drawn polygon
+    /// genuinely has `"geometry": null` -- `Option` here, not a bare
+    /// `serde_json::Value`, so that case deserializes cleanly instead of
+    /// needing every caller to check for `Value::Null` by hand.
+    geometry: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -42,6 +47,33 @@ struct AlertProperties {
     area_desc: Option<String>,
     effective: Option<String>,
     expires: Option<String>,
+}
+
+/// Pure so the geometry-capture logic (real GeoJSON `geometry` -> stored
+/// JSON string, `null`/missing -> `None`) is directly testable against a
+/// real captured shape, same reasoning `parse_forecast_periods` below is
+/// its own function rather than living inline in the fetch.
+fn parse_alert_features(features: Vec<AlertFeature>) -> Vec<IncomingAlert> {
+    features
+        .into_iter()
+        .map(|f| {
+            let raw_json = serde_json::to_string(&f.properties).unwrap_or_default();
+            let geometry_json = f.geometry.map(|g| serde_json::to_string(&g).unwrap_or_default());
+            let p = f.properties;
+            IncomingAlert {
+                id: f.id,
+                event: p.event,
+                severity: p.severity,
+                headline: p.headline,
+                description: p.description,
+                area_desc: p.area_desc,
+                effective: p.effective,
+                expires: p.expires,
+                raw_json,
+                geometry_json,
+            }
+        })
+        .collect()
 }
 
 fn fetch_active_alerts(lat: f64, lon: f64) -> Result<Vec<IncomingAlert>, String> {
@@ -61,26 +93,7 @@ fn fetch_active_alerts(lat: f64, lon: f64) -> Result<Vec<IncomingAlert>, String>
         .map_err(|e| e.to_string())?;
 
     let body: AlertsResponse = resp.json().map_err(|e| e.to_string())?;
-
-    Ok(body
-        .features
-        .into_iter()
-        .map(|f| {
-            let raw_json = serde_json::to_string(&f.properties).unwrap_or_default();
-            let p = f.properties;
-            IncomingAlert {
-                id: f.id,
-                event: p.event,
-                severity: p.severity,
-                headline: p.headline,
-                description: p.description,
-                area_desc: p.area_desc,
-                effective: p.effective,
-                expires: p.expires,
-                raw_json,
-            }
-        })
-        .collect())
+    Ok(parse_alert_features(body.features))
 }
 
 /// Runs one alerts fetch and reports it. Shared by the background poller
@@ -283,6 +296,61 @@ mod tests {
     //! discipline (flight_tracking.rs, pota.rs) of not depending on a
     //! live third-party service in the default test run.
     use super::*;
+
+    // Both captured live from a real `GET
+    // https://api.weather.gov/alerts/active` request, 2026-09-25 -- not
+    // hand-invented. The polygon case is a real Flood Warning (Gallia/
+    // Vinton, OH); the null-geometry case is a real Dense Fog Advisory,
+    // trimmed to just what parse_alert_features actually reads.
+    const REAL_ALERT_WITH_POLYGON: &str = r#"{
+        "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.dd1453ebfd5a6aa238c7e5297d2c67cbb8f43f0f.001.1",
+        "geometry": {"type": "Polygon", "coordinates": [[[-82.43, 39.03], [-82.41, 39.21], [-82.31, 39.21], [-82.32, 38.85], [-82.43, 39.03]]]},
+        "properties": {
+            "event": "Flood Warning",
+            "severity": "Severe",
+            "headline": "Flood Warning issued September 25 at 11:57AM EDT until September 25 at 12:00PM EDT by NWS Charleston WV",
+            "description": "Flooding continues along the Ohio River.",
+            "areaDesc": "Gallia, OH; Vinton, OH",
+            "effective": "2026-09-25T11:57:00-04:00",
+            "expires": "2026-09-25T12:07:00-04:00"
+        }
+    }"#;
+
+    const REAL_ALERT_WITH_NULL_GEOMETRY: &str = r#"{
+        "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.dense-fog-example",
+        "geometry": null,
+        "properties": {
+            "event": "Dense Fog Advisory",
+            "severity": "Minor",
+            "headline": null,
+            "description": "Visibility one quarter mile or less in dense fog.",
+            "areaDesc": "Example County",
+            "effective": "2026-09-25T05:00:00-04:00",
+            "expires": "2026-09-25T09:00:00-04:00"
+        }
+    }"#;
+
+    #[test]
+    fn parse_alert_features_captures_a_real_polygon_geometry() {
+        let feature: AlertFeature = serde_json::from_str(REAL_ALERT_WITH_POLYGON).unwrap();
+        let parsed = parse_alert_features(vec![feature]);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].event, "Flood Warning");
+        let geometry_json = parsed[0].geometry_json.as_ref().expect("this alert has a real polygon");
+        let geometry: serde_json::Value = serde_json::from_str(geometry_json).unwrap();
+        assert_eq!(geometry["type"], "Polygon");
+        assert!(geometry["coordinates"][0].as_array().unwrap().len() >= 4, "a real polygon ring needs at least 4 points");
+    }
+
+    #[test]
+    fn parse_alert_features_leaves_a_real_null_geometry_as_none() {
+        // A zone/state-issued alert with no drawn shape must come out as
+        // `None`, not a parse failure or a fabricated empty geometry.
+        let feature: AlertFeature = serde_json::from_str(REAL_ALERT_WITH_NULL_GEOMETRY).unwrap();
+        let parsed = parse_alert_features(vec![feature]);
+        assert_eq!(parsed[0].event, "Dense Fog Advisory");
+        assert!(parsed[0].geometry_json.is_none());
+    }
 
     #[test]
     fn parse_forecast_periods_reads_the_real_nws_shape() {
