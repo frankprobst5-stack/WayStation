@@ -190,9 +190,19 @@ profiles — separate containers on a persistent host — which doesn't transfer
 single compiled desktop binary. WayStation borrows the *philosophy* (pick only the
 capability you want, don't carry the weight of what you don't) through its own,
 WayStation-appropriate mechanism — a real plugin/feature-toggle architecture inside the
-Tauri app itself. **Which exact mechanism (a genuine plugin system, compile-time feature
-flags with a runtime UI toggle, or something else) is real, unstarted research, not a
-decision made here.** Rough three-way division of labor across the family, itself still
+Tauri app itself. ~~**Which exact mechanism... is real, unstarted research, not a decision
+made here.**~~ **Resolved 2026-09-25** — see the Citadel Ecosystem `ARCHITECTURE.md`'s new
+"Module conventions" section (the real cross-project convergence this same paragraph called
+for): compile-time code, runtime toggle. Every capability's code ships in the one existing
+binary (no change to `release.yml`'s current single-binary-per-platform build), and a new
+`station_profile.enabled_modules` set — same real, proven pattern as `theme`/`tactical_mode`
+— drives whether a module's sidebar tab shows and whether its background poller thread even
+spawns. Chosen over a genuine dynamic plugin system (no stable Rust ABI across compiler
+versions, real ongoing cross-platform risk for a `.deb`/`.AppImage`/`.msi` release matrix)
+and over compile-time Cargo feature flags (would mean a different binary per feature
+combination, multiplying that same build matrix for no real gain). The Settings → Modules
+panel this implies is deliberately built to match Citadel's and Muster's own real toggle UX,
+not a fourth unrelated settings screen. Rough three-way division of labor across the family, itself still
 open to revision: Citadel hosts new shared/always-on capability as real Citadel modules
 (the RTL-SDR workbench, D-STAR/MeshCore/Reticulum, drone/video ISR — matching the same
 hardware-hub pattern already proven for weather/maps/scanner); WayStation keeps and
