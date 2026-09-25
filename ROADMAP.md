@@ -488,6 +488,46 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-09-25 (WayStation's own modularization work starts for real — v1: Mesh, Rig,
+  Rotator)** — First real application of the ecosystem-wide module-convention convergence
+  resolved the same day (Citadel Ecosystem `ARCHITECTURE.md`'s "Module conventions" section),
+  including the mechanism decision that section made: compile-time code, runtime toggle, not
+  a dynamic plugin system or per-feature Cargo build matrix. Scoped deliberately to the three
+  local-hardware integrations that could be done safely in one pass — Mesh (Meshtastic), Rig
+  Control, and Rotator Control — rather than all six real candidates named in the 2026-09-15
+  architecture-initiative entry above. Rig/Rotator already had real, working `rig_enabled`/
+  `rotator_enabled` toggles (migration v21) checked live on every poller cycle; this pass
+  built the missing third of that pattern for Mesh (`mesh_enabled`, migration v53, `DEFAULT
+  1` so no existing install silently loses mesh on upgrade) and, more importantly, built the
+  first real **unified surface** for all three: a new Settings → Modules tab
+  (`ModulesPanel.tsx`) using the shared manifest fields the ecosystem convention defines
+  (`id`/`title`/`icon`/`description`/`requires_hardware`) with a real toggle-switch UI
+  deliberately styled to match Citadel's and Muster's own Settings → Modules screens. Purely
+  additive: the existing Station Identity form's `rig_enabled`/`rotator_enabled` checkboxes
+  are completely untouched and still work — three new dedicated commands
+  (`set_mesh_enabled`/`set_rig_enabled`/`set_rotator_enabled`, mirroring `set_tactical_mode`'s
+  exact instant-apply shape) write the same columns from the new panel, so both surfaces stay
+  correct together with no conflict. `mesh.rs`'s poller now checks `mesh_enabled` live on
+  every loop iteration exactly like `rig.rs` already did — no app restart needed either way,
+  though the two aren't identical: Rig/Rotator apply within seconds (no persistent
+  connection to interrupt), while Mesh applies immediately to any *new* connection attempt
+  but an already-connected mesh session stays up until it naturally reconnects or the
+  operator hits Reconnect on Messaging → Mesh, matching this codebase's own existing,
+  deliberate philosophy for a changed `mesh_host` (`reconnect_mesh`'s own doc comment: "a
+  settings change never silently kills a live link out from under the operator") — caught and
+  corrected in this same entry after first claiming a blanket "within a few seconds," which
+  would have been wrong for an already-connected session (`READ_TIMEOUT` is a real 10
+  minutes). `MessagingPanel.tsx`'s "Mesh (Meshtastic)" tab and
+  `ToolsPanel.tsx`'s "Radio Control" tab (and the individual Rig/Rotator sections within it)
+  now hide when their module is off, matching Citadel's own "a disabled module isn't in the
+  UI at all" convention rather than showing a disabled/greyed-out state. **Explicitly not
+  done in this pass, named rather than silently deferred**: Winlink (Pat), JS8Call, and
+  Packet (APRS/Direwolf) don't have their own toggle yet — each manages a real subprocess (a
+  mailbox daemon, a KISS TCP client against a real audio-capturing Direwolf process), so
+  turning one off should also actually stop that process cleanly, not just skip a status
+  poll like Mesh/Rig/Rotator's simpler TCP-client-only integrations could. That's real,
+  distinct follow-up work. 147 Rust tests passing (no regressions), clean TypeScript build,
+  clean release build.
 - **2026-09-24 (real color-palette rebrand: dark theme now matches Citadel exactly)** —
   Frank's own follow-up after the 2026-09-18 entry below was corrected for
   overclaiming: "get rid of the green, keep the white and red, use the default
