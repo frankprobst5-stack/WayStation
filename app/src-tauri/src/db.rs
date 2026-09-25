@@ -127,6 +127,19 @@ pub struct StationProfile {
     /// not a plain DB write) actually kills or (re)spawns the process, not
     /// just flips this column. See `pat.rs`.
     pub winlink_enabled: bool,
+    /// Whether the JS8Call TCP client should even try to connect. Same
+    /// simple live-checked-flag shape as `mesh_enabled` -- WayStation never
+    /// spawns JS8Call itself (see js8call.rs's own module doc), it's purely
+    /// a client, so there's no subprocess to stop, unlike `winlink_enabled`.
+    pub js8call_enabled: bool,
+    /// Whether Packet (APRS/Direwolf) should run at all -- gates both
+    /// `aprs::spawn_listener` (a live TCP client, same simple shape as
+    /// `mesh_enabled`) and Direwolf itself, which IS a real subprocess
+    /// (same shape as `winlink_enabled`) but, unlike Pat, was already
+    /// never auto-started -- see direwolf.rs's own doc comment. Disabling
+    /// this also stops Direwolf if an operator had it running; its own
+    /// setter (`direwolf::set_packet_enabled`) is not a plain DB write.
+    pub packet_enabled: bool,
     pub updated_at: Option<String>,
 }
 
@@ -164,6 +177,8 @@ impl Default for StationProfile {
             theme: "dark".to_string(),
             mesh_enabled: true,
             winlink_enabled: true,
+            js8call_enabled: true,
+            packet_enabled: true,
             updated_at: None,
         }
     }
@@ -171,7 +186,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, winlink_enabled, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, winlink_enabled, js8call_enabled, packet_enabled, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -196,7 +211,9 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 citadel_vault_token: row.get(18)?,
                 mesh_enabled: row.get::<_, i64>(19)? != 0,
                 winlink_enabled: row.get::<_, i64>(20)? != 0,
-                updated_at: row.get(21)?,
+                js8call_enabled: row.get::<_, i64>(21)? != 0,
+                packet_enabled: row.get::<_, i64>(22)? != 0,
+                updated_at: row.get(23)?,
             })
         },
     )
@@ -291,6 +308,32 @@ pub fn set_mesh_enabled(db: State<Db>, enabled: bool) -> StationProfile {
     station_profile(&conn)
 }
 
+/// Same reasoning and shape as `set_mesh_enabled` -- JS8Call is purely a
+/// TCP client WayStation never spawns (see js8call.rs's own module doc),
+/// so a plain flag flip is the whole story, unlike `winlink_enabled` below.
+#[tauri::command]
+pub fn set_js8call_enabled(db: State<Db>, enabled: bool) -> StationProfile {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET js8call_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update js8call_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, js8call_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for js8call_enabled");
+    }
+    station_profile(&conn)
+}
+
 /// Deliberately NOT a `#[tauri::command]` -- unlike `set_mesh_enabled` above,
 /// flipping this column alone would be dishonest: Pat is a real subprocess,
 /// not a live TCP client with nothing to stop, so the actual command the
@@ -314,6 +357,32 @@ pub fn set_winlink_enabled_flag(conn: &Connection, enabled: bool) -> StationProf
             params![enabled as i64, now],
         )
         .expect("failed to create station_profile for winlink_enabled");
+    }
+    station_profile(&conn)
+}
+
+/// Deliberately NOT a `#[tauri::command]`, same reasoning as
+/// `set_winlink_enabled_flag` -- Direwolf is a real subprocess, so the
+/// actual command the frontend calls (`direwolf::set_packet_enabled`)
+/// does this DB write plus a real stop, and lives in direwolf.rs where
+/// `DirewolfProcess` state is.
+pub fn set_packet_enabled_flag(conn: &Connection, enabled: bool) -> StationProfile {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET packet_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update packet_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, packet_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for packet_enabled");
     }
     station_profile(&conn)
 }
@@ -406,6 +475,8 @@ fn save_station_profile_conn(
     let theme = existing.theme;
     let mesh_enabled = existing.mesh_enabled;
     let winlink_enabled = existing.winlink_enabled;
+    let js8call_enabled = existing.js8call_enabled;
+    let packet_enabled = existing.packet_enabled;
     conn.execute(
         "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, citadel_vault_token, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, updated_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
@@ -452,6 +523,8 @@ fn save_station_profile_conn(
         theme,
         mesh_enabled,
         winlink_enabled,
+        js8call_enabled,
+        packet_enabled,
         updated_at: Some(now),
     }
 }
@@ -4824,6 +4897,27 @@ const MIGRATIONS: &[&str] = &[
     // comment gives: existing installs already run Pat today.
     r#"
     ALTER TABLE station_profile ADD COLUMN winlink_enabled INTEGER NOT NULL DEFAULT 1;
+    "#,
+    // v55: js8call_enabled, decided 2026-09-25 -- third module in
+    // WayStation's own modularization work. Unlike Pat/Direwolf, WayStation
+    // never spawns JS8Call itself (js8call.rs is purely a TCP client), so
+    // this is the same simple live-checked-flag shape as mesh_enabled, not
+    // winlink_enabled's real process-lifecycle one. DEFAULT 1 for the same
+    // reason every other module's own migration comment gives.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN js8call_enabled INTEGER NOT NULL DEFAULT 1;
+    "#,
+    // v56: packet_enabled, decided 2026-09-25 -- fourth and final module in
+    // this pass of WayStation's own modularization work. Real, mixed
+    // shape: gates both aprs.rs's live TCP client (simple flag, same as
+    // mesh_enabled) and direwolf.rs's real subprocess (needs an actual
+    // stop, same as winlink_enabled) -- see direwolf::set_packet_enabled.
+    // DEFAULT 1 for the same reason every other module's own migration
+    // comment gives, though Direwolf itself was already never
+    // auto-started (see direwolf.rs), so this mostly affects the APRS
+    // listener and whether Start on the Packet panel is allowed to work.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN packet_enabled INTEGER NOT NULL DEFAULT 1;
     "#,
 ];
 

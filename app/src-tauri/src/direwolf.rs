@@ -100,6 +100,18 @@ pub struct DirewolfStatus {
     pub process_running: bool,
     pub agw_reachable: bool,
     pub kiss_reachable: bool,
+    /// Same reasoning as `WinlinkStatus.enabled` -- lets the UI say
+    /// "switched off in Settings" instead of a bare "not running."
+    pub enabled: bool,
+}
+
+/// Same real, live-checked pattern every other module's own `_enabled`
+/// helper uses (`rig::rig_enabled`, `pat::winlink_enabled`, etc.). Gates
+/// both this file's own `start_direwolf` and `aprs.rs`'s live listener.
+pub fn packet_enabled(app: &AppHandle) -> bool {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().expect("db mutex poisoned");
+    db::station_profile(&conn).packet_enabled
 }
 
 #[tauri::command]
@@ -131,6 +143,7 @@ pub fn get_direwolf_status(app: AppHandle) -> DirewolfStatus {
         process_running,
         agw_reachable: tcp_reachable(AGW_PORT),
         kiss_reachable: tcp_reachable(KISS_PORT),
+        enabled: packet_enabled(&app),
     }
 }
 
@@ -142,6 +155,9 @@ pub fn get_direwolf_status(app: AppHandle) -> DirewolfStatus {
 /// know why nothing happened, not a panel that just stays gray.
 #[tauri::command]
 pub fn start_direwolf(app: AppHandle) -> Result<(), String> {
+    if !packet_enabled(&app) {
+        return Err("Packet (APRS/Direwolf) is switched off in Settings > Modules.".to_string());
+    }
     let binary = find_direwolf_binary()
         .ok_or_else(|| "Direwolf isn't installed (checked PATH, /usr/bin, /usr/local/bin).".to_string())?;
 
@@ -185,6 +201,27 @@ pub fn stop_direwolf(app: AppHandle) {
     }
 }
 
+/// The real Packet (APRS/Direwolf) module toggle (Settings > Modules).
+/// Mixed shape, matching the real mixed nature of this integration: a
+/// plain DB flag flip (gates `aprs::spawn_listener`, a live TCP client
+/// with nothing else to stop) plus, when turning off, a real `stop_direwolf`
+/// so an operator-started Direwolf process doesn't keep running after its
+/// module is switched off -- Direwolf itself was already never
+/// auto-started, so there's no equivalent "turn on" spawn step here the
+/// way `pat::set_winlink_enabled` has.
+#[tauri::command]
+pub fn set_packet_enabled(app: AppHandle, enabled: bool) -> DirewolfStatus {
+    {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().expect("db mutex poisoned");
+        db::set_packet_enabled_flag(&conn, enabled);
+    }
+    if !enabled {
+        stop_direwolf(app.clone());
+    }
+    get_direwolf_status(app)
+}
+
 /// Reports Direwolf state into `source_health` on its own cadence, same
 /// reasoning as pat.rs/js8call.rs's pollers -- otherwise its state is
 /// only ever known while the Packet panel is on screen. Unlike those
@@ -199,7 +236,9 @@ pub fn stop_direwolf(app: AppHandle) {
 pub fn spawn_health_poller(app: AppHandle) {
     std::thread::spawn(move || loop {
         let status = get_direwolf_status(app.clone());
-        let (health, detail) = if !status.binary_found {
+        let (health, detail) = if !status.enabled {
+            (Status::Degraded, Some("Switched off in Settings.".to_string()))
+        } else if !status.binary_found {
             (Status::Down, Some("Direwolf isn't installed.".to_string()))
         } else if !status.process_running {
             (Status::Unknown, Some("Not running. Press Start on the Packet panel.".to_string()))

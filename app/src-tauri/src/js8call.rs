@@ -84,16 +84,31 @@ pub struct Js8CallStatus {
     pub reachable: bool,
     pub callsign: Option<String>,
     pub detail: Option<String>,
+    /// Same reasoning as `RigStatus.enabled`/`MeshStatus.enabled` -- lets
+    /// the UI say "switched off in Settings" instead of a bare unreachable
+    /// error when this is off by choice, not a real failure.
+    pub enabled: bool,
+}
+
+/// Same real, live-checked pattern `rig::rig_enabled`/`mesh::mesh_enabled`
+/// already use.
+fn js8call_enabled(app: &AppHandle) -> bool {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().expect("db mutex poisoned");
+    crate::db::station_profile(&conn).js8call_enabled
 }
 
 #[tauri::command]
-pub fn get_js8call_status() -> Js8CallStatus {
+pub fn get_js8call_status(app: AppHandle) -> Js8CallStatus {
+    if !js8call_enabled(&app) {
+        return Js8CallStatus { reachable: false, callsign: None, detail: Some("Switched off in Settings.".to_string()), enabled: false };
+    }
     match request("STATION.GET_CALLSIGN", "", "STATION.CALLSIGN") {
         Ok(resp) => {
             let callsign = resp.get("value").and_then(Value::as_str).map(str::to_string);
-            Js8CallStatus { reachable: true, callsign, detail: None }
+            Js8CallStatus { reachable: true, callsign, detail: None, enabled: true }
         }
-        Err(detail) => Js8CallStatus { reachable: false, callsign: None, detail: Some(detail) },
+        Err(detail) => Js8CallStatus { reachable: false, callsign: None, detail: Some(detail), enabled: true },
     }
 }
 
@@ -109,8 +124,10 @@ pub fn get_js8call_status() -> Js8CallStatus {
 /// evidence the station can still pass traffic with the internet gone.
 pub fn spawn_poller(app: AppHandle) {
     std::thread::spawn(move || loop {
-        let status = get_js8call_status();
-        let (health, detail) = if status.reachable {
+        let status = get_js8call_status(app.clone());
+        let (health, detail) = if !status.enabled {
+            (Status::Degraded, Some("Switched off in Settings.".to_string()))
+        } else if status.reachable {
             (Status::Healthy, None)
         } else {
             // The raw connect error ("Connection refused") is less useful

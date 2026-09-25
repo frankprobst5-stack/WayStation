@@ -27,6 +27,8 @@ interface StationProfileModuleFields {
   rig_enabled: boolean;
   rotator_enabled: boolean;
   winlink_enabled: boolean;
+  js8call_enabled: boolean;
+  packet_enabled: boolean;
 }
 
 const MODULE_CATALOG: ModuleManifest[] = [
@@ -47,6 +49,24 @@ const MODULE_CATALOG: ModuleManifest[] = [
     requiresHardware: false,
     profileField: "winlink_enabled",
     command: "set_winlink_enabled",
+  },
+  {
+    id: "js8call",
+    title: "JS8Call",
+    icon: "💬",
+    description: "Weak-signal keyboard-to-keyboard chat over JS8Call's own TCP API. Waystation never runs JS8Call itself — off just means it stops trying to connect.",
+    requiresHardware: false,
+    profileField: "js8call_enabled",
+    command: "set_js8call_enabled",
+  },
+  {
+    id: "packet",
+    title: "Packet (APRS/Direwolf)",
+    icon: "📻",
+    description: "RF station positions decoded from Direwolf's KISS output. Direwolf is a real subprocess — off actually stops it if running, not just the APRS listener.",
+    requiresHardware: true,
+    profileField: "packet_enabled",
+    command: "set_packet_enabled",
   },
   {
     id: "rig",
@@ -138,11 +158,6 @@ function ModulesPanel() {
             onToggle={(next) => setProfile((p) => (p ? { ...p, [m.profileField]: next } : p))}
           />
         ))}
-      </div>
-      <div className="bandplan-disclaimer">
-        JS8Call and Packet (APRS/Direwolf) don't have their own toggle here yet — Direwolf in particular manages a
-        real audio-capture subprocess, so turning it off should also stop that cleanly, not just skip a status
-        poll (the same real work Winlink's toggle above just did for Pat). That's real, distinct follow-up work.
       </div>
     </div>
   );

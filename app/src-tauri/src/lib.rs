@@ -161,6 +161,8 @@ pub fn run() {
             db::set_mesh_enabled,
             db::set_rig_enabled,
             db::set_rotator_enabled,
+            db::set_js8call_enabled,
+            direwolf::set_packet_enabled,
             db::set_theme,
             db::get_traffic_counts,
             db::get_recent_activity,

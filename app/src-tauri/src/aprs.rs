@@ -328,6 +328,19 @@ fn run_connection(app: &AppHandle) -> Result<(), String> {
 /// app.
 pub fn spawn_listener(app: AppHandle) {
     std::thread::spawn(move || loop {
+        // Same real, live-checked pattern every other module's poller
+        // uses -- shares direwolf.rs's own flag since both this listener
+        // and Direwolf itself are the two halves of one "Packet
+        // (APRS/Direwolf)" module in Settings.
+        if !crate::direwolf::packet_enabled(&app) {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().expect("db mutex poisoned");
+            connectivity::report_source_health(&conn, SOURCE_ID, "APRS (RF)", Status::Degraded, Via::Aprs, Some("Switched off in Settings."));
+            drop(conn);
+            std::thread::sleep(RECONNECT_DELAY);
+            continue;
+        }
+
         if let Err(detail) = run_connection(&app) {
             let db = app.state::<Db>();
             let conn = db.0.lock().expect("db mutex poisoned");

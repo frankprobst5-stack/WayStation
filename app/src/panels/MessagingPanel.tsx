@@ -131,28 +131,47 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
   );
 }
 
+// Maps each transport's own tab name to the station_profile field that
+// gates it -- all four local-hardware transports now have a real Settings
+// > Modules toggle (2026-09-25), each hiding its own tab here when off,
+// the same way Tactical Mode already hides hobbyist panels from the
+// sidebar. "Overview"/"Messages (ICS-213/309)"/"Net Control" aren't tied
+// to any one module, so they're absent from this map and always visible.
+const TAB_MODULE_FIELD: Partial<Record<Tab, keyof StationProfileTransportFields>> = {
+  "Mesh (Meshtastic)": "mesh_enabled",
+  Winlink: "winlink_enabled",
+  JS8Call: "js8call_enabled",
+  "Packet (APRS/Direwolf)": "packet_enabled",
+};
+
+interface StationProfileTransportFields {
+  mesh_enabled: boolean;
+  winlink_enabled: boolean;
+  js8call_enabled: boolean;
+  packet_enabled: boolean;
+}
+
 function MessagingPanel() {
   const [tab, setTab] = useState<Tab>("Overview");
-  // Mesh and Winlink both have real Settings > Modules toggles now
-  // (2026-09-25) -- each hides its own tab here when off, the same way
-  // Tactical Mode already hides hobbyist panels from the sidebar.
-  // JS8Call/Packet don't have their own toggle yet (see ModulesPanel.tsx's
-  // own note on why), so their tabs stay unconditional.
-  const [meshEnabled, setMeshEnabled] = useState(true);
-  const [winlinkEnabled, setWinlinkEnabled] = useState(true);
+  const [enabled, setEnabled] = useState<StationProfileTransportFields>({
+    mesh_enabled: true,
+    winlink_enabled: true,
+    js8call_enabled: true,
+    packet_enabled: true,
+  });
 
   useEffect(() => {
-    invoke<{ mesh_enabled: boolean; winlink_enabled: boolean }>("get_station_profile").then((p) => {
-      setMeshEnabled(p.mesh_enabled);
-      setWinlinkEnabled(p.winlink_enabled);
-    });
+    invoke<StationProfileTransportFields>("get_station_profile").then(setEnabled);
   }, []);
 
-  const visibleTabs = TABS.filter((t) => (meshEnabled || t !== "Mesh (Meshtastic)") && (winlinkEnabled || t !== "Winlink"));
+  const visibleTabs = TABS.filter((t) => {
+    const field = TAB_MODULE_FIELD[t];
+    return !field || enabled[field];
+  });
   useEffect(() => {
-    if (!meshEnabled && tab === "Mesh (Meshtastic)") setTab("Overview");
-    if (!winlinkEnabled && tab === "Winlink") setTab("Overview");
-  }, [meshEnabled, winlinkEnabled, tab]);
+    const field = TAB_MODULE_FIELD[tab];
+    if (field && !enabled[field]) setTab("Overview");
+  }, [enabled, tab]);
 
   return (
     <div className="panel-weather">
