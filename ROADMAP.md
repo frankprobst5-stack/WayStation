@@ -484,7 +484,27 @@ After the exercise or incident, WayStation exports the communications log, messa
   earlier "verified live" claims missed, since those only checked the
   Vite dev-server preview, never the actual compiled app) — confirmed
   fixed once `cargo build --release` picked up the current `dist/` and the
-  app was relaunched. **Scope note**: this is the
+  app was relaunched.
+  **Correction, second pass, same day**: everything above wrongly folded
+  WayStation's semantic status color (`--green`, meaning OK/online/
+  healthy/connected) into the brand-blue change. The ecosystem's own
+  canonical design system (`citadel-ecosystem/brand/PALETTE.md`, written
+  2026-09-18 during Citadel's own real 15-page conversion) explicitly
+  marks status colors as functional, not brand, and states they don't
+  change with a rebrand — Citadel itself keeps green for exactly this
+  meaning throughout. Reverted `--green` in both dark and light themes to
+  a real green (`#59d67c`, PALETTE.md's own canonical value, not just
+  WayStation's prior `#39d97a`/`#1f9d52`, so "connected" now means the
+  same color here as in Citadel itself), and fixed the two `.time-bar
+  strong`/`.rig-freq` glow shadows that were paired with `var(--green)`
+  but hadn't followed it. Brand chrome (bg/panel/border/primary accent)
+  and the Tactical Map hillshade stay blue — both were explicit,
+  confirmed exceptions, unlike the status color which was never asked
+  about on its own and just came along under the general instruction.
+  Map-marker categorical colors (net check-ins, POTA activator, satellite
+  subpoint) also stay blue — those mark *what kind of thing* a pin is, not
+  system health, so PALETTE.md's status-color rule doesn't apply to them.
+  Rebuilt and relaunched the real app again to verify. **Scope note**: this is the
   color palette only — `tauri.conf.json`'s `productName`/window title are
   still the bare `"Waystation"`, unchanged, per the correction in the entry
   below. The original 2026-09-05 rationale for the amber/green "command
