@@ -246,6 +246,134 @@ pub fn save_citadel_scanner_config(db: State<Db>, request: ScannerConfigRequest)
     Ok(body)
 }
 
+/// A saved scanner setup an operator can flip between without re-filling
+/// the whole setup form each time -- the real "like a Uniden BearCat"
+/// request from a storm-chaser field tester (2026-09-16, this project's
+/// own ROADMAP.md), picked up once the field-test freeze lifted
+/// (2026-09-24). Mirrors Citadel's `scanner_config.py::make_profile()`
+/// output exactly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerProfile {
+    pub id: String,
+    pub name: String,
+    pub system_type: String,
+    pub short_name: String,
+    pub driver: String,
+    pub device: Option<String>,
+    pub center_hz: f64,
+    pub rate_hz: f64,
+    pub gain: f64,
+    pub control_channels_hz: Vec<i64>,
+    pub squelch: f64,
+    pub ppm: Option<f64>,
+    pub csv_data: String,
+}
+
+/// Mirrors Citadel's `GET /api/scanner/profiles` shape. `active_profile_id`
+/// is `None` when the live config was set directly (via
+/// `save_citadel_scanner_config`) or nothing's configured yet -- not a
+/// sign anything is broken.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannerProfilesResponse {
+    pub profiles: Vec<ScannerProfile>,
+    pub active_profile_id: Option<String>,
+}
+
+#[tauri::command]
+pub fn list_citadel_scanner_profiles(db: State<Db>) -> Result<ScannerProfilesResponse, String> {
+    let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
+    let url = format!("{}/api/scanner/profiles", citadel_base(&host));
+    client()
+        .get(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
+        .send()
+        .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| format!("Citadel returned something unexpected: {e}"))
+}
+
+/// Same shape as `ScannerConfigRequest` plus the profile's own name --
+/// saving a profile validates it exactly like a direct config save (see
+/// Citadel's `make_profile()`) but never touches the live active config,
+/// only this new saved-profiles store.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ScannerProfileRequest {
+    pub name: String,
+    pub system_type: String,
+    pub short_name: String,
+    pub driver: String,
+    pub device: Option<String>,
+    pub center_hz: f64,
+    pub rate_hz: f64,
+    pub gain: f64,
+    pub control_channels_hz: Vec<i64>,
+    pub squelch: f64,
+    pub ppm: Option<f64>,
+    pub csv_data: String,
+}
+
+#[tauri::command]
+pub fn save_citadel_scanner_profile(db: State<Db>, request: ScannerProfileRequest) -> Result<ScannerProfile, String> {
+    let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
+    let url = format!("{}/api/scanner/profiles", citadel_base(&host));
+    let resp = client()
+        .post(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
+        .json(&request)
+        .send()
+        .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().map_err(|e| format!("Citadel returned something unexpected: {e}"))?;
+    if !status.is_success() {
+        let detail = body.get("detail").and_then(Value::as_str).unwrap_or("Citadel rejected this profile");
+        return Err(detail.to_string());
+    }
+    serde_json::from_value(body["profile"].clone()).map_err(|e| format!("Citadel returned something unexpected: {e}"))
+}
+
+/// Makes a saved profile the live config -- the one-tap "switch systems"
+/// action, instead of re-filling the whole setup form each time.
+#[tauri::command]
+pub fn activate_citadel_scanner_profile(db: State<Db>, profile_id: String) -> Result<Value, String> {
+    let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
+    let url = format!("{}/api/scanner/profiles/{profile_id}/activate", citadel_base(&host));
+    let resp = client()
+        .post(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
+        .send()
+        .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().map_err(|e| format!("Citadel returned something unexpected: {e}"))?;
+    if !status.is_success() {
+        let detail = body.get("detail").and_then(Value::as_str).unwrap_or("Citadel could not activate this profile");
+        return Err(detail.to_string());
+    }
+    Ok(body)
+}
+
+#[tauri::command]
+pub fn delete_citadel_scanner_profile(db: State<Db>, profile_id: String) -> Result<(), String> {
+    let host = station_citadel_host(&db);
+    let token = station_citadel_vault_token(&db);
+    let url = format!("{}/api/scanner/profiles/{profile_id}", citadel_base(&host));
+    let resp = client()
+        .delete(&url)
+        .header("X-Vault-Token", token.unwrap_or_default())
+        .send()
+        .map_err(|e| format!("could not reach Citadel at {url}: {e}"))?;
+    if !resp.status().is_success() {
+        let body: Value = resp.json().unwrap_or_default();
+        let detail = body.get("detail").and_then(Value::as_str).unwrap_or("Citadel could not delete this profile");
+        return Err(detail.to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -93,6 +93,34 @@ interface ScannerConfigResponse {
   csv_data?: string;
 }
 
+// Mirrors citadel_scanner::ScannerProfile / ScannerProfilesResponse.
+interface ScannerProfile {
+  id: string;
+  name: string;
+  system_type: string;
+  short_name: string;
+  driver: string;
+  device: string | null;
+  center_hz: number;
+  rate_hz: number;
+  gain: number;
+  control_channels_hz: number[];
+  squelch: number;
+  ppm: number | null;
+  csv_data: string;
+}
+
+interface ScannerProfilesResponse {
+  profiles: ScannerProfile[];
+  active_profile_id: string | null;
+}
+
+const SYSTEM_TYPE_LABEL: Record<string, string> = {
+  trunked: "Trunked P25",
+  conventional: "Conventional (analog)",
+  conventionalP25: "Conventional P25",
+};
+
 type SystemType = "trunked" | "conventional" | "conventionalP25";
 
 type StatusState = { kind: "loading" } | { kind: "ready"; status: ScannerStatus } | { kind: "unreachable"; message: string };
@@ -133,6 +161,17 @@ function ScannerPanel() {
   const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
   const [incidentPicks, setIncidentPicks] = useState<Record<string, string>>({});
   const [loggedFilenames, setLoggedFilenames] = useState<Set<string>>(new Set());
+
+  // Saved scanner profiles -- "like a Uniden BearCat," flip between a
+  // trunked county system and a conventional Fire/EMS list without
+  // re-filling the setup form each time. Real field request, 2026-09-16
+  // (WayStation's own ROADMAP.md), built 2026-09-24.
+  const [profiles, setProfiles] = useState<ScannerProfile[]>([]);
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [profileSaveState, setProfileSaveState] = useState<SaveState>({ kind: "idle" });
 
   async function refreshRecordings() {
     try {
@@ -211,12 +250,99 @@ function ScannerPanel() {
     }
   }
 
+  async function refreshProfiles() {
+    try {
+      const resp = await invoke<ScannerProfilesResponse>("list_citadel_scanner_profiles");
+      setProfiles(resp.profiles);
+      setActiveProfileId(resp.active_profile_id);
+      setProfilesError(null);
+    } catch (err) {
+      setProfilesError(String(err));
+    }
+  }
+
   useEffect(() => {
     refreshStatus();
     loadExistingConfig();
     refreshRecordings();
     loadIncidents();
+    refreshProfiles();
   }, []);
+
+  function loadProfileIntoForm(p: ScannerProfile) {
+    setSystemType(p.system_type as SystemType);
+    setShortName(p.short_name);
+    setDriver(p.driver);
+    setDevice(p.device ?? "");
+    setCenterMhz((p.center_hz / 1_000_000).toString());
+    setRateMhz((p.rate_hz / 1_000_000).toString());
+    setGain(p.gain.toString());
+    setPpm(p.ppm !== null ? p.ppm.toString() : "");
+    setSquelch(p.squelch.toString());
+    setControlChannelsMhz(p.control_channels_hz.map((hz) => (hz / 1_000_000).toString()).join(", "));
+    setTalkgroupsCsv(p.csv_data);
+  }
+
+  async function activateProfile(id: string) {
+    setBusyProfileId(id);
+    try {
+      await invoke("activate_citadel_scanner_profile", { profileId: id });
+      const activated = profiles.find((p) => p.id === id);
+      if (activated) loadProfileIntoForm(activated);
+      setConfiguredOnCitadel(true);
+      await refreshProfiles();
+    } catch (err) {
+      setProfilesError(String(err));
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  async function deleteProfile(id: string) {
+    setBusyProfileId(id);
+    try {
+      await invoke("delete_citadel_scanner_profile", { profileId: id });
+      await refreshProfiles();
+    } catch (err) {
+      setProfilesError(String(err));
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  async function saveCurrentAsProfile(e: React.FormEvent) {
+    e.preventDefault();
+    setProfileSaveState({ kind: "saving" });
+    try {
+      const controlChannelsHz = controlChannelsMhz
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => Math.round(parseFloat(s) * 1_000_000));
+      await invoke("save_citadel_scanner_profile", {
+        request: {
+          name: newProfileName.trim(),
+          system_type: systemType,
+          short_name: shortName.trim(),
+          driver,
+          device: device.trim() || null,
+          center_hz: parseFloat(centerMhz) * 1_000_000,
+          rate_hz: parseFloat(rateMhz) * 1_000_000,
+          gain: parseFloat(gain),
+          control_channels_hz: controlChannelsHz,
+          squelch: parseFloat(squelch),
+          ppm: ppm.trim() ? parseFloat(ppm) : null,
+          csv_data: talkgroupsCsv,
+        },
+      });
+      setProfileSaveState({ kind: "done" });
+      setNewProfileName("");
+      await refreshProfiles();
+      setTimeout(() => setProfileSaveState({ kind: "idle" }), 3000);
+    } catch (err) {
+      setProfileSaveState({ kind: "error", message: String(err) });
+    }
+  }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -533,6 +659,66 @@ function ScannerPanel() {
             </table>
           </div>
         )}
+      </div>
+
+      <div className="scan-section">
+        <div className="scan-section-head">
+          <h3>Saved Profiles</h3>
+        </div>
+        <p className="scan-hint">
+          Save several complete scanner setups — a trunked county system and a conventional Fire/EMS list, say — and
+          switch between them with one tap, instead of re-filling the whole Setup form each time. Activating a
+          profile makes it the live config on Citadel, exactly like Save to Citadel below.
+        </p>
+        {profilesError && <div className="scan-result scan-result-error">Could not reach Citadel: {profilesError}</div>}
+        {profiles.length === 0 && !profilesError && <div className="scan-empty">No saved profiles yet — fill out Setup below, then save it as one.</div>}
+        {profiles.length > 0 && (
+          <div className="scan-table-wrap">
+            <table className="scan-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {profiles.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      {p.name}
+                      {p.id === activeProfileId && <span className="scan-pill scan-pill-good" style={{ marginLeft: "0.5rem" }}>ACTIVE</span>}
+                    </td>
+                    <td>{SYSTEM_TYPE_LABEL[p.system_type] ?? p.system_type}</td>
+                    <td>
+                      <div className="scan-form-row">
+                        <button type="button" onClick={() => activateProfile(p.id)} disabled={busyProfileId === p.id || p.id === activeProfileId}>
+                          {busyProfileId === p.id ? "Activating…" : p.id === activeProfileId ? "Active" : "Activate"}
+                        </button>
+                        <button type="button" onClick={() => deleteProfile(p.id)} disabled={busyProfileId === p.id}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <form className="scan-form-row" onSubmit={saveCurrentAsProfile} style={{ marginTop: "0.75rem" }}>
+          <input
+            value={newProfileName}
+            onChange={(e) => setNewProfileName(e.currentTarget.value)}
+            placeholder="Name this setup, e.g. PANCOM Fire/EMS"
+            required
+          />
+          <button type="submit" disabled={profileSaveState.kind === "saving"}>
+            {profileSaveState.kind === "saving" ? "Saving…" : "Save Setup Below As Profile"}
+          </button>
+        </form>
+        {profileSaveState.kind === "done" && <div className="scan-result scan-result-ok">Profile saved.</div>}
+        {profileSaveState.kind === "error" && <div className="scan-result scan-result-error">{profileSaveState.message}</div>}
       </div>
 
       <div className="scan-section">
