@@ -95,7 +95,7 @@ const MARKER_COLORS: Record<string, string> = {
 
 const PERSONNEL_COLOR = "#ff6ec7";
 const RESOURCE_REQUEST_COLOR = "#7c5cff";
-const APRS_COLOR = "#2fd4a0";
+const APRS_COLOR = "#ffffff";
 
 // Mirrors aprs::AprsStation -- real KISS/AX.25/APRS positions decoded
 // from Direwolf's RF traffic (direwolf.rs/aprs.rs). Source-tagged
@@ -258,12 +258,12 @@ function TacticalMapPanel() {
     }
     for (const r of roster) {
       if (r.latitude !== null && r.longitude !== null) {
-        addPin(r.latitude, r.longitude, "#39d97a", `Check-in: ${r.callsign} (${r.status === "checked_in" ? "in" : "out"})`);
+        addPin(r.latitude, r.longitude, "#008dff", `Check-in: ${r.callsign} (${r.status === "checked_in" ? "in" : "out"})`);
       }
     }
     for (const res of resources) {
       if (res.latitude !== null && res.longitude !== null) {
-        addPin(res.latitude, res.longitude, "#5aa9e6", `Resource: ${res.label}`);
+        addPin(res.latitude, res.longitude, "#e8b93f", `Resource: ${res.label}`);
       }
     }
     // Real RF-heard APRS stations -- same "standing presence, not an
@@ -411,10 +411,10 @@ function TacticalMapPanel() {
           <span className="tactical-map-swatch" style={{ background: "#ffb000" }} /> Mesh nodes
         </span>
         <span>
-          <span className="tactical-map-swatch" style={{ background: "#39d97a" }} /> Net check-ins
+          <span className="tactical-map-swatch" style={{ background: "#008dff" }} /> Net check-ins
         </span>
         <span>
-          <span className="tactical-map-swatch" style={{ background: "#5aa9e6" }} /> Resources
+          <span className="tactical-map-swatch" style={{ background: "#e8b93f" }} /> Resources
         </span>
         {MARKER_TYPES.map((t) => (
           <span key={t}>

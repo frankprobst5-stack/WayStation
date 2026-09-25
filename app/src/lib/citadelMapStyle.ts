@@ -84,8 +84,14 @@ export async function citadelStyle(base: string): Promise<{ style: maplibregl.St
     layers.push({
       id: "hillshade",
       type: "hillshade",
+      // Retinted 2026-09-24, WayStation-side only: the olive-green highlight
+      // was a real, visible green wash across the whole Tactical Map terrain
+      // -- much more obvious than any single marker color. Shadow/highlight
+      // now reuse Citadel's own real bg/border values (cockpit/index.html's
+      // --bg and --border) instead of inventing new hex, keeping the same
+      // shadow/highlight luminance contrast the terrain relief needs.
       source: "terrain",
-      paint: { "hillshade-shadow-color": "#0a0e07", "hillshade-highlight-color": "#3a4a2a", "hillshade-exaggeration": 0.6 },
+      paint: { "hillshade-shadow-color": "#05090d", "hillshade-highlight-color": "#2a4a66", "hillshade-exaggeration": 0.6 },
     });
   }
 

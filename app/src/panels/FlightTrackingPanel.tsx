@@ -51,6 +51,18 @@ function lastContactLabel(unixSeconds: number): string {
   return `${hours}h ${minutes % 60}m ago`;
 }
 
+/** A small directional plane silhouette, pointing north (0°) at rest — MapLibre's
+ * own `rotation`/`rotationAlignment` Marker options turn it to the real heading,
+ * so no per-frame transform math lives here. */
+function createAircraftElement(color: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 2 L20 20 L12 16 L4 20 Z" fill="${color}" stroke="#1a1a1a" stroke-width="0.75" stroke-opacity="0.5"/>
+  </svg>`;
+  el.style.cursor = "pointer";
+  return el;
+}
+
 function aircraftLabel(a: AircraftTrack): string {
   const id = a.callsign ?? a.icao24;
   if (a.on_ground) return `${id} — on ground`;
@@ -150,7 +162,11 @@ function FlightMap({ tracks, onSelect }: { tracks: AircraftTrack[]; onSelect: (t
 
     for (const t of tracks) {
       if (t.latitude === null || t.longitude === null) continue;
-      const marker = new maplibregl.Marker({ color: t.on_ground ? ON_GROUND_COLOR : AIRCRAFT_COLOR })
+      const marker = new maplibregl.Marker({
+        element: createAircraftElement(t.on_ground ? ON_GROUND_COLOR : AIRCRAFT_COLOR),
+        rotation: t.true_track ?? 0,
+        rotationAlignment: "map",
+      })
         .setLngLat([t.longitude, t.latitude])
         .setPopup(new maplibregl.Popup({ offset: 16 }).setText(aircraftLabel(t)))
         .addTo(map);

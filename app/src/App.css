@@ -1,7 +1,17 @@
 /* ==========================================================================
-   Theme: "command center" — deep charcoal base, amber/Heathkit-green
-   accents, is the default and primary identity — every reference dashboard
-   hams responded to during initial design was this look, not a toggle.
+   Theme: "command center". Originally amber/Heathkit-green (every reference
+   dashboard hams responded to during initial design was this look) — revised
+   2026-09-24, Frank's own call, to match Citadel's real navy/blue identity
+   instead: with WayStation now a public sibling app in the same ecosystem
+   as Citadel, sharing one visual identity across the suite mattered more
+   than the original standalone look. Dark theme's bg/panel/border/text/
+   accent values below are Citadel's own actual hex values, taken directly
+   from `cockpit/index.html`'s `:root` — not approximated. Green is
+   deliberately gone as a rendered color (every former `--green` usage now
+   resolves to the same blue as the brand accent) while red and white/near-
+   white text are unchanged in spirit, per that same instruction. The
+   original hams'-feedback rationale for the amber/green look is worth
+   remembering if this ever needs revisiting, not erased by this note.
 
    Revisited 2026-09-05: real theme selection added after all, per operator
    request and against that original single-theme call — two real needs
@@ -15,14 +25,20 @@
    themes below redefine the exact same variable set, driven by
    `:root[data-theme="dark|light|red"]` (set from `station_profile.theme`,
    applied in App.tsx on load) — "dark" remains the default a fresh install
-   opens to.
+   opens to. **The red theme is deliberately untouched by the 2026-09-24
+   rebrand** — it was already green-free by construction (every accent
+   there, `--green` included, is already a shade of red) and mixing in a
+   literal blue would defeat the one thing that theme exists for.
 
-   Status-tier colors (green=good/quiet, amber=caution/moderate,
+   Status-tier colors (originally green=good/quiet, amber=caution/moderate,
    red=danger/severe) are semantic and reused everywhere — alerts, net
    roster, message precedence, space weather, freshness — for a
-   consistent "read the color, not the text" command-center feel. In the
-   red theme specifically, that same semantic meaning is preserved through
-   brightness/saturation instead of hue, since hue can't vary there.
+   consistent "read the color, not the text" command-center feel. As of
+   2026-09-24 the "good/quiet" tier renders in blue, not green, in both the
+   dark and light themes (see `--green` in each below) — the semantic
+   meaning and every call site are unchanged, only the rendered hue moved.
+   In the red theme specifically, that same semantic meaning is preserved
+   through brightness/saturation instead of hue, since hue can't vary there.
    ========================================================================== */
 
 :root {
@@ -40,40 +56,45 @@
 
 :root,
 :root[data-theme="dark"] {
-  /* Surfaces */
-  --bg-app: #0a0c09;
-  --bg-panel: #14170f;
-  --bg-input: #10120c;
+  /* Surfaces — Citadel's own real values (cockpit/index.html's :root) */
+  --bg-app: #05090d;
+  --bg-panel: #071a2c;
+  --bg-input: #0a2038;
 
-  /* Text */
-  --text-primary: #e6e4d6;
-  --text-muted: #8f9280;
+  /* Text — Citadel's own real values */
+  --text-primary: #e7f1f8;
+  --text-muted: #aebbc7;
 
-  /* Borders — warm amber tint at low alpha, not neutral gray */
-  --border: rgba(255, 191, 92, 0.16);
-  --border-strong: rgba(255, 191, 92, 0.32);
+  /* Borders — blue tint at low alpha, matching Citadel's own accent hue
+     instead of the original warm amber tint */
+  --border: rgba(0, 141, 255, 0.16);
+  --border-strong: rgba(0, 141, 255, 0.32);
 
-  /* Accent palette */
+  /* Accent palette — amber/red already matched Citadel's own values almost
+     exactly and are unchanged; blue is now Citadel's literal brand accent
+     (#008dff); green is deliberately gone as a rendered color and resolves
+     to that same blue (every var(--green) call site is unchanged, only the
+     hue is) */
   --amber: #ffb000;
   --amber-dim: #b8860b;
-  --green: #39d97a;
+  --green: #008dff;
   --gold: #e8b93f;
-  --red: #ff4d4f;
+  --red: #e05252;
   --purple: #c77dff;
-  --blue: #5aa9e6;
-  --gray: #8a8d80;
+  --blue: #008dff;
+  --gray: #5b7386;
 
   /* A dot with no active status -- unlit, not "good." */
   --status-off: #333333;
 
-  /* Translucent amber-tinted overlays, layered on top of --bg-panel for
-     rows/chips/buttons/tiles — same technique as before, warm tint instead
-     of neutral gray. */
-  --surface-1: rgba(255, 191, 92, 0.05);
-  --surface-2: rgba(255, 191, 92, 0.08);
-  --surface-3: rgba(255, 191, 92, 0.11);
-  --surface-4: rgba(255, 191, 92, 0.14);
-  --surface-5: rgba(255, 191, 92, 0.18);
+  /* Translucent blue-tinted overlays, layered on top of --bg-panel for
+     rows/chips/buttons/tiles — matches Citadel's own accent hue instead of
+     the original warm amber tint. */
+  --surface-1: rgba(0, 141, 255, 0.05);
+  --surface-2: rgba(0, 141, 255, 0.08);
+  --surface-3: rgba(0, 141, 255, 0.11);
+  --surface-4: rgba(0, 141, 255, 0.14);
+  --surface-5: rgba(0, 141, 255, 0.18);
 }
 
 /* Light (Day Ops) -- bright-environment readability. Same warm-tint
@@ -93,7 +114,9 @@
 
   --amber: #b8720a;
   --amber-dim: #8a5a08;
-  --green: #1f9d52;
+  /* Green retired 2026-09-24 along with the dark theme's — resolves to
+     this theme's own existing blue rather than a newly invented hex. */
+  --green: #2f74b8;
   --gold: #a98416;
   --red: #c22326;
   --purple: #8e4fd1;
@@ -393,7 +416,9 @@ body {
 .time-bar strong {
   font-size: 0.95rem;
   color: var(--green);
-  text-shadow: 0 0 6px rgba(57, 217, 122, 0.35);
+  /* Glow retinted 2026-09-24 alongside --green -- was a hardcoded green
+     (rgba of the old #39d97a) that didn't follow the variable's new blue. */
+  text-shadow: 0 0 6px rgba(0, 141, 255, 0.35);
 }
 
 .panel-grid {
@@ -659,6 +684,22 @@ body {
 
 .weather-radar-canvas {
   height: 420px;
+}
+
+.weather-radar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.weather-radar-scrubber {
+  flex: 1;
+  accent-color: var(--amber);
 }
 
 .marker-form {
@@ -2622,21 +2663,24 @@ select {
   margin-top: 0.3rem;
 }
 
+/* Retinted 2026-09-24: was a neon-green "hacker terminal" glow (#39ff14);
+   now Citadel's own real bright accent (--accent-bright, cockpit/index.html)
+   for the same glow treatment, matching the rest of the rebrand. */
 .about-action-button {
-  color: #39ff14;
-  background: #0a0f0a;
-  border: 1px solid #39ff14;
+  color: #28c8ff;
+  background: #05090d;
+  border: 1px solid #28c8ff;
   border-radius: 6px;
   padding: 0.5em 0.9em;
   font-weight: 600;
-  text-shadow: 0 0 6px rgba(57, 255, 20, 0.8), 0 0 14px rgba(57, 255, 20, 0.4);
-  box-shadow: 0 0 8px rgba(57, 255, 20, 0.35), inset 0 0 8px rgba(57, 255, 20, 0.08);
+  text-shadow: 0 0 6px rgba(40, 200, 255, 0.8), 0 0 14px rgba(40, 200, 255, 0.4);
+  box-shadow: 0 0 8px rgba(40, 200, 255, 0.35), inset 0 0 8px rgba(40, 200, 255, 0.08);
   transition: box-shadow 0.15s ease, text-shadow 0.15s ease;
 }
 
 .about-action-button:hover {
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.95), 0 0 20px rgba(57, 255, 20, 0.6);
-  box-shadow: 0 0 14px rgba(57, 255, 20, 0.55), inset 0 0 10px rgba(57, 255, 20, 0.15);
+  text-shadow: 0 0 8px rgba(40, 200, 255, 0.95), 0 0 20px rgba(40, 200, 255, 0.6);
+  box-shadow: 0 0 14px rgba(40, 200, 255, 0.55), inset 0 0 10px rgba(40, 200, 255, 0.15);
 }
 
 /* Diagnostics */
@@ -2849,7 +2893,8 @@ select {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: var(--green);
-  text-shadow: 0 0 8px rgba(57, 217, 122, 0.35);
+  /* Glow retinted 2026-09-24 alongside --green -- see .time-bar strong above. */
+  text-shadow: 0 0 8px rgba(0, 141, 255, 0.35);
 }
 
 .rig-unit {

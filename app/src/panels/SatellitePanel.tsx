@@ -148,7 +148,7 @@ function SatellitePanel() {
       "#ffb000",
     );
     if (status) {
-      drawPin(ctx, width, height, status.subpoint_lon_deg, status.subpoint_lat_deg, "#39d97a");
+      drawPin(ctx, width, height, status.subpoint_lon_deg, status.subpoint_lat_deg, "#008dff");
     }
   }, [groundTrack, status]);
 

@@ -8,7 +8,10 @@ export function project(lon: number, lat: number, width: number, height: number)
 }
 
 export function drawLand(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  ctx.fillStyle = "#3a5f3a";
+  // Retinted 2026-09-24: was a plain green (#3a5f3a); now Citadel's own
+  // real blue-gray (--gray, cockpit/index.html), kept lighter than the
+  // canvas ocean/background fill (#1a2a3a) so land/water stay distinguishable.
+  ctx.fillStyle = "#5b7386";
   ctx.beginPath();
   for (const ring of landOutline as Ring[]) {
     ring.forEach(([lon, lat], i) => {

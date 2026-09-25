@@ -105,7 +105,7 @@ function WorldMapPanel() {
       next.push({
         lat: s.latitude,
         lon: s.longitude,
-        color: "#39d97a",
+        color: "#008dff",
         summary: [
           `POTA: ${s.activator} @ ${s.reference}`,
           s.park_name ?? "",

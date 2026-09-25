@@ -145,6 +145,29 @@ Frank owns no dedicated mesh/AREDN/SDR test hardware yet — the app is being bu
 
 ## v2 backlog (deferred until after the offline field test)
 
+**Update, 2026-09-24 — field test concluded, freeze lifted.** Frank reports the real
+month-long offline field test is done — roughly two weeks ahead of the original
+~2026-10-07 estimate, with no real crashes or data loss beyond what's already fixed
+below. Testers gave real feedback (see the two DISCOVERY entries this same update
+adds detail to), and Frank's own framing is explicitly "no hurry," not urgent. Active
+feature development, including WayStation's own modularization initiative above, is
+unblocked as of today; nothing here is forced to move immediately, it's just no longer
+a hard-blocked wait. Three concrete items are the natural first pick-ups whenever that
+happens: the flight-tracking icon-rotation fix, the radar animation loop + additional
+NWS map products, and the scanner multi-profile switcher (all three already scoped in
+their own entries below, none newly invented here). A real cross-project consequence
+already landed ahead of this, separately from the freeze: Citadel's `vault-api` got a
+critical unauthenticated-access fix this same week, which — as an unintended
+side-effect — broke the scanner bridge's calls into Citadel; `ae0b9cd` added a real
+`citadel_vault_token` header so the bridge keeps working against the now-patched
+Citadel, verified live. **One real pattern worth naming across the two field-feedback
+DISCOVERY items below, not just two unrelated asks**: both are requests to lean on the
+*online* tier harder when it's actually available — an animated radar loop, more real
+NWS products, one-tap profile switching — not anything about the RF/offline tiers.
+Worth weighing as real signal the next time online-vs-offline feature priority comes
+up: testers aren't asking WayStation to be less offline-capable, they're asking the
+online half to do more while it's there.
+
 **2026-09-07: Frank is standing up a second, physically separate computer to run WayStation fully offline for a real month-long field test — the actual point of everything built so far. Active feature development pauses here, deliberately: every item below is real, scoped, and not forgotten, but adding more untested surface area right before the test would work against the test's own purpose. Nothing here blocks going offline.** Before cutting over, confirm the offline machine is running latest `main` — the `source_health` launch-crash fix (2026-09-06, see changelog) landed the same session as several other changes, so a stale clone could carry that exact crash into the field. Separately, the hardware-blocked items in **Built, but not yet proven in the field** above aren't "deferred" in this sense — they're already code-complete and waiting on real gear (a second mesh node, an RTL-SDR, a real correspondent station), not on a decision to wait; real field use may exercise some of them for the first time regardless.
 
 **A separate, larger v2 vision landed the same day: see [DESIGN.md](DESIGN.md).** A full page-by-page redesign direction for both WayStation and Citadel (Frank + another Claude session, working from real mockup screenshots), covering a Citadel home-screen redesign (Off-Grid Readiness score, health strip), a genuinely new First Aid & Medical Support subsystem, tab reorganization across nearly every existing WayStation page, and several new cross-feature integrations (POTA→rig, reception report→map, satellite pass→Doppler countdown, aircraft proximity/altitude alerts). None of it is scheduled or broken into real tasks yet — the mockup screenshots themselves still need to be gone through for concrete layout/interaction detail before any of this is buildable work, same as everything else in this section. **Note this is the UI/UX layer of the redesign** — layout, page organization, visual system — distinct from the architecture-layer initiative below, which is about how capability is packaged and toggled, not how it's laid out on screen. The two are complementary, not overlapping.
@@ -230,6 +253,13 @@ Reconciled 2026-09-03 against a longer external planning list Frank was carrying
 **Tactical Ingestion** — operator-flagged critical priority, all three
 - **Trunked radio scanner (RTL-SDR + `trunk-recorder`/`op25`)** — **UI and setup done in WayStation, 2026-09-05; conventional-system support added 2026-09-06.** Citadel's `vault-api` serves `/api/scanner` (live status) and `/api/scanner/config` (setup); `citadel_scanner.rs` is the client (reuses `station_profile.citadel_map_host`, same configurable-host pattern the map tiles use), and `ScannerPanel.tsx` (Scanner tab) is both the setup form and the live display — one panel, matching Frank's explicit call that all comms and emergency traffic stay in WayStation rather than splitting across a Citadel-side page (the same reasoning that got Citadel's old `comms.html` deleted). Setup is deliberately generic: any operator's own system data works, whether it's hand-typed off RadioReference's free (no subscription needed) system pages, pulled from digitalfrequencysearch.com's free FCC-license data, or shared on OpenMHz — Citadel validates and writes a real trunk-recorder config regardless of source. **2026-09-06: real conventional (fixed-frequency, non-trunked) system support** — closes a real gap found the moment Frank brought real Sheriff/Fire/EMS frequencies (PANCOM, Donley County, TX) that the original trunked-only builder couldn't express at all (`control_channels` doesn't apply to a system where every channel is its own fixed frequency). Verified trunk-recorder's real `conventional`/`conventionalP25` schema via its own CONFIGURE.md before writing anything (not guessed): a `channelFile` CSV with `TG Number` as a mandatory first column, `Frequency` required, `Tone`/`Alpha Tag`/`Description`/etc. optional. New `build_conventional_config()` + `validate_channel_file_csv()` in `scanner_config.py`; `vault-api`'s `POST /api/scanner/config` now takes a `system_type` (`trunked`/`conventional`/`conventionalP25`) and dispatches to the right builder, saving whichever CSV that type actually uses without touching the other (switching types and back doesn't lose data). `citadel_scanner.rs`/`ScannerPanel.tsx` updated to match: a system-type selector, squelch field for conventional systems, and the response/request CSV field renamed from `talkgroups_csv` to the honestly-generic `csv_data` since it's really two different real shapes behind one name. A real, useful constraint surfaced along the way and worth recording: a single RTL-SDR's realistic capture bandwidth (~2.4MHz) can't cover PANCOM's full 4.7MHz frequency spread in one source -- 8 of its 10 real channels cluster within 1.825MHz and fit fine, but EMS Dispatch (158.7675/158.8425 MHz) sits ~2.9MHz away and needs its own dongle/session for true simultaneous coverage, not a software limitation. Configured and verified live against the real running Citadel instance: the 4-channel PANCOM P25 dispatch cluster (Sheriff Repeater East/West, Fire Dispatch East/West, all real NAC 61F) is the currently active config; the analog set (Sheriff Dispatch + 3 VFD tacticals) and the AEP P25 trunked utility system (two real trunked sites, Clarendon/Hedley) are both verified-working configs ready to paste in whenever the operator switches -- only one system can be active in Citadel's single `config.json` at a time today, a real current limitation (multi-profile switching is real future scope, not built tonight). **Real field confirmation this actually matters, 2026-09-16**: a real storm chaser running WayStation off-grid from his vehicle during the field test asked, unprompted, whether the scanner could work "like a Uniden BearCat" — cycle through a saved set of frequencies and switch between trunked/non-trunked on demand. He doesn't know `system_type` already covers trunked vs. conventional; what he's actually asking for is exactly the multi-profile gap named above — save several real configs (e.g. a trunked county system and a conventional Fire/EMS list) and flip between them without re-filling the whole setup form each time. This is Citadel-side work (`scanner_config.py` would need to store more than one named config and a POST to activate one), not WayStation's — deliberately not started during WayStation's own field-test freeze (~2026-10-07), logged here so it isn't lost. 9 new Rust tests (2 pure, 2 live -- one for each system shape, both passing against the real stack) and 12 new Python tests (all passing) -- WayStation now 120 tests total, 120 passing, 9 live-only skipped; Citadel's `test_scanner_config.py` now 27 tests, all passing. Clean TypeScript build, clean release build. **2026-09-06 (same day, second session): the statusServer bridge script is done.** Verified trunk-recorder's real websocket status protocol from its own docs before writing anything -- and caught a real design mistake doing so: an earlier draft had the bridge dialing *out* to trunk-recorder as a client, but trunk-recorder's own docs are explicit that trunk-recorder is the client, connecting *out* to a configured `statusServer` URL. Had that shipped, the bridge would never have received a single real message against actual hardware -- caught by re-reading the docs before writing the connection test, not by a field failure. New `scanner_bridge.py`: pure parsing functions for the `systems`/`calls_active`/`recorders`/`rates` message types (two have real documented example payloads, quoted verbatim in tests; two only have documented field *names*, stated plainly rather than implied to be captured payloads), a `ScannerState` accumulator matching trunk-recorder's real independent-message event model, and a real websocket *server* (`run_bridge()`) that trunk-recorder connects to. Both `scanner_config.py` builders now set `statusServer: "ws://scanner-bridge:3010/server"` -- without this, real hardware would run and record calls but never emit a single status message, a real gap that would have made the whole rest of this feature silently do nothing. New `scanner-bridge` docker-compose service (same "hardware" profile as `scanner`, pure software otherwise). Live-verified as thoroughly as this sandboxed environment allows: no USB passthrough here means trunk-recorder itself can't run, but the actual `citadel-scanner-bridge` container was started for real, a real websocket client (playing trunk-recorder's exact role) connected to it over a real TCP socket, sent real message shapes, and the container wrote real `scanner_state.json` to the real shared volume path `vault-api` reads from -- confirmed by reading the file back from both inside the container and the host. Test data cleaned up afterward. `citadel_scanner.rs` gained matching structs (`ScannerSystem`/`ScannerActiveCall`/`ScannerRecorder`/`ScannerDecodeRate`), tested by deserializing the exact JSON captured from that live container run, plus a check that Citadel's pre-2026-09-06 no_data shape still parses cleanly. `ScannerPanel.tsx` gained real Systems/Active Talkgroups (Live)/Recorder Health tables -- deliberately *not* the full System-Status mockup layout: trunk-recorder's statusServer has no per-site breakdown (only per-system) and no recordings-list API exists yet, so neither was built to avoid fabricating structure the real data doesn't support. 2 new Rust tests, 12 new Python tests (11 pure parsing/state + 1 real live server/client socket test, run separately since it needs the `websockets` package the base suite doesn't) -- WayStation now 122 tests total, 122 passing, 9 live-only skipped; Citadel now 39 tests total, all passing (38 in the always-run suite, 1 live-only). Clean TypeScript build, clean release build. 🔲 Still genuinely open, hardware-blocked not code-blocked: an actual RTL-SDR dongle -- everything downstream of that is now real and tested. Real remaining scope, not started: a recordings-list API (nothing currently exposes the real files trunk-recorder writes to `captureDir`), site-level status (trunk-recorder's real message types don't carry it, so the mockup's per-site rows would need a different real data source or stay unbuilt), binding a transcript onto the active incident's timeline via `incident_events` once real transcripts exist, and multi-system-per-source / a config-profile switcher.
 - ~~**Flight tracking (ADS-B)**~~ — ✅ **online half done, 2026-09-04** (see that day's changelog and Built-and-verified section below). `flight_tracking.rs` polls OpenSky's free public API in a bounding box around the station's grid square. 🔲 Still open, genuinely hardware-blocked not code-blocked: the local `dump1090`/`readsb` SDR fallback for when the internet's down — same category of gap as mesh multi-node testing needing a second physical node.
+  - ~~**"Just a white pin"**~~ — ✅ **done 2026-09-24.** `FlightMap`'s aircraft now render as
+    a small rotated plane silhouette (a plain inline SVG via a custom MapLibre `Marker`
+    `element`, turned to the real heading with MapLibre's own `rotation`/
+    `rotationAlignment: "map"` options — no per-frame transform math needed) instead of a
+    flat colored dot. No backend change, exactly as scoped below. The trailing flight-path
+    line (the more ambitious ask, needing a real schema change) is still not built — named
+    honestly, not silently forgotten.
   - **"Just a white pin" — real, cheap fix identified 2026-09-16** `[DISCOVERY]`, from Keith
     B. Phillips (the same contributor behind the `qrcoder` tool). Checked the actual code
     before answering: `FlightTrackingPanel.tsx`'s `FlightMap` plots every aircraft as a plain
@@ -247,6 +277,13 @@ Reconciled 2026-09-03 against a longer external planning list Frank was carrying
     field-test freeze (~2026-10-07) — logged so the icon-rotation quick win (and the
     trail's real schema cost) aren't lost.
 - **Weather — 3-tier design settled 2026-09-05, online tier built.** Frank's framing: online (web forecast/radar/alerts), RF/offline (NOAA weather radio SAME decode, satellite APT/LRPT imagery), and local (a physical weather-station console) — WayStation should degrade cleanly from the first to the last as connectivity drops, same pattern as everything else in this app. Online tier done this session: `nws.rs` gained real NWS forecast fetching (the documented two-step `/points` → `/gridpoints/.../forecast` flow, migration v41's `forecast_periods` table, same replace-on-fetch pattern as `pota_spots`) and `TacticalMapPanel.tsx` gained a "Show Radar" toggle backed by RainViewer's free, keyless public tile API — both verified live before writing code. `WeatherPanel.tsx` (EmComm tab) is the new dedicated weather page Frank asked for, showing the forecast; radar lives on the map since it's inherently a map layer. Citadel's `/api/weather` (honest no_data default) still exists for the RF/local tiers below — the stale note that it was "shown in comms.html" is corrected here; that page no longer exists (see 2026-09-05 comms.html removal).
+  - ~~**Radar loop**~~ — ✅ **animated half done 2026-09-24.** The Weather → Radar tab now
+    cycles through RainViewer's real `radar.past` frame sequence (play/pause, a scrubber,
+    each frame's real timestamp) instead of showing only the single latest one — the exact
+    mostly-UI change this entry below already scoped, reusing data already being fetched
+    and discarded. Still open: the additional NWS products (SPC outlook, watches/warnings
+    polygons, river/flood gauges, current observations) named below — the radar animation
+    only closes the first half of this item.
   - **Radar loop + more NWS map resources** `[DISCOVERY]`, 2026-09-16 — real request from a storm chaser running WayStation off-grid in his vehicle during the field test, who offered to name the specific NWS products he wants once asked. Checked the actual code before writing this: `radar.ts`'s `fetchLatestRadarTileTemplate()` already fetches RainViewer's `weather-maps.json` response, which includes a real `radar.past` array (~13 frames, last ~2 hours) — today only the last frame (`frames[frames.length - 1]`) is ever used, the rest are fetched and discarded. A real animated loop is mostly a UI change (cycle through the existing `past` frames on a timer with play/pause/speed controls), not a new data source — RainViewer's response may also carry a `radar.nowcast` array worth checking for short-term forecast frames. Separately, `nws.rs` only wires up two real NWS products today (active alerts as text with no polygons — already flagged as a known follow-up in that file's own module doc — and point forecast text); no SPC convective outlook, no watches/warnings polygons on the map, no river/flood gauge data, no current observations. Deliberately not started during WayStation's own field-test freeze (~2026-10-07) — logging here so the specific product list he offers isn't lost, and scoping each one is its own small piece of work once picked (a different `api.weather.gov` endpoint per product, not one uniform fetch).
   - **RF/offline tier, still `[PLANNED]`:** NOAA weather radio SAME decode — the one genuinely automatable RF source, since all ~1,000+ transmitters nationwide share 7 fixed frequencies; a bundled static transmitter-lookup table (sourced from NWS's public per-state listings) could auto-suggest the local channel from grid square, same zero-setup-cost idea as flight tracking. Satellite APT/LRPT imagery reception is real and more accessible than expected (an RTL-SDR + a simple antenna can pull a NOAA/METEOR-M pass down directly, no internet needed) and could reuse WayStation's existing satellite pass-prediction/Doppler code for timing — but note METEOR-M's LRPT is the current beginner recommendation over the aging APT satellites. Both need an RTL-SDR on Citadel's side, same hardware-hub pattern as the scanner — and if an operator wants scanner + satellite reception at once, that's two separate dongles (one SDR, one job at a time), not a software limitation.
   - ~~**Local tier**~~ — ✅ **done, 2026-09-05.** `weather_station.rs` polls either brand directly over the operator's own LAN — no Citadel, no internet, matching the whole point of this tier. **Ecowitt** (or other Fine Offset-compatible gateway, ~$60-90): real `/get_livedata_info` JSON, parsed defensively since the format is honestly inconsistent (some values carry a separate `unit` field, others embed it directly in the string, e.g. `"3.2 m/s"`). **Davis WeatherLink Live** (~$200+): real no-auth local v1 API. Both normalized to US-customary units (°F/mph/inHg) matching `nws.rs`'s existing convention; one named limitation, not silently guessed past: Davis's rain rate is raw tipping-bucket counts, converted using the standard 0.01in/tip assumption most US Vantage Pro2/Vue stations use, flagged plainly in the UI for anyone with a non-standard collector. Migration v43 (`station_profile.local_weather_brand`/`local_weather_host`, singleton `local_weather_observation` table — same shape as `space_weather`). Configured on the Station Identity form, displayed on the Weather page. Added a genuine 5th `Via` value (`Lan`) alongside the documented `internet|mesh|rf|manual` set — a LAN device is honestly neither of the first two, and mislabeling it would be a real (if not state-machine-breaking) inaccuracy in what the operator sees. 8 new Rust tests against real captured API shapes from both brands — one caught a real bug in the value/unit parser before it shipped (a value with no unit suffix at all was wrongly treated as unparseable). 108 tests total, 103 passing, 5 live-only skipped.
@@ -364,6 +401,137 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-09-24 (real color-palette rebrand: dark theme now matches Citadel exactly)** —
+  Frank's own follow-up after the 2026-09-18 entry below was corrected for
+  overclaiming: "get rid of the green, keep the white and red, use the default
+  blues like Citadel, so it looks uniform across the whole suite." Read Citadel's
+  own real `:root` values directly from `cockpit/index.html` rather than
+  approximating them. The dark theme (`App.css`'s default and primary identity)
+  now uses Citadel's literal hex values for background/panel/input
+  (`#05090d`/`#071a2c`/`#0a2038`), text (`#e7f1f8`/`#aebbc7`), and its real
+  brand accent blue (`#008dff`, was a much lighter `#5aa9e6`); borders and the
+  five translucent `--surface-*` overlays are now blue-tinted instead of
+  amber-tinted, matching Citadel's own accent hue; `--red` is aligned to
+  Citadel's `#e05252` (was `#ff4d4f`, already close); `--amber` needed no
+  change — `#ffb000` already matched Citadel's own value exactly. Green is
+  gone as a rendered color: `--green` now resolves to the same blue as
+  `--blue`, so every one of the ~31 `var(--green)` call sites across the app
+  (status dots, connection chips, alert borders, freshness indicators) still
+  means exactly what it meant before ("good/quiet/connected") but now renders
+  blue instead of green — no component files touched, only the CSS variable's
+  value. Four hardcoded green hex literals that bypassed the variable
+  entirely (`TacticalMapPanel.tsx`'s net-check-in pin and legend swatch,
+  `WorldMapPanel.tsx`'s POTA activator pin, `SatellitePanel.tsx`'s subpoint
+  pin) were also updated to the same blue, since a map marker's color can't
+  reference a CSS custom property. Caught and fixed a real collision this
+  would have otherwise introduced: `TacticalMapPanel.tsx`'s "Resources" pin
+  was hardcoded to the *old* `--blue` value (`#5aa9e6`) — once check-ins
+  became blue too, the map legend would have shown two near-identical blues
+  for two different meanings; recolored "Resources" to gold (`#e8b93f`,
+  already an existing theme color) to keep the legend legible. The light
+  theme gets the same treatment scoped down: `--green` now resolves to that
+  theme's own pre-existing `--blue` (`#2f74b8`) rather than a newly invented
+  hex, everything else left alone since Citadel has no light mode to match
+  hex-for-hex. **The red (night-vision) theme is deliberately untouched** —
+  it was already green-free by construction (every accent there, including
+  its own `--green`, is already a shade of red) and introducing a literal
+  blue would defeat the one thing that theme exists for, per its own
+  standing design rule. Verified live: computed `--green`/`--blue`/`--red`/
+  `--bg-app` values checked directly in a real running dev-server browser
+  session across all three `data-theme` states (default/light/red all
+  correct), plus a clean `tsc --noEmit` and a clean production `vite build`.
+  **Correction, same day**: "confirmed no leftover green anywhere" was
+  wrong — Frank caught two real misses on the actual Tactical Map that a
+  CSS-variable audit alone couldn't find, since neither goes through
+  `--green`: `TacticalMapPanel.tsx`'s `APRS_COLOR` (`#2fd4a0`, a teal-green
+  RF-station marker, recolored to white — distinct from every other marker
+  hue already on that map, and a literal instance of "keep the white" from
+  the original instruction) and, the bigger one, `citadelMapStyle.ts`'s
+  shared hillshade paint (`hillshade-highlight-color: #3a4a2a`, an olive
+  green terrain wash covering the *entire* Tactical Map whenever
+  `tactical_terrain.pmtiles` is present). That file's own doc comment says
+  it deliberately mirrors Citadel's own `cockpit/map.html`, which carries
+  the identical green hillshade value — both files used it, so it read as a
+  much larger, more obvious green than any single marker. Fixed
+  WayStation's own copy only, per Frank's explicit scoping ("im talking
+  about waystation") — Citadel's `map.html` still has the original green
+  hillshade, a known, not-yet-addressed follow-up if suite-wide uniformity
+  is wanted there too. New values reuse Citadel's own real `--bg`/`--border`
+  hex (`#05090d`/`#2a4a66`) rather than inventing new ones, keeping the same
+  shadow/highlight contrast the terrain relief needs. Also checked
+  protomaps-themes-base's own `dark` theme source directly for further
+  green in land-use/park colors — none found, so the vector basemap itself
+  isn't a remaining source. Ran a final programmatic sweep of every hex/rgb
+  color literal across `app/src` (not just files matching the word
+  "green") to catch anything a targeted search would miss — found and fixed
+  two more real ones this way, neither named "green" in code: a neon-green
+  "hacker terminal" glow on the About panel's action button (`#39ff14` and
+  its matching `rgba()` text-shadow/box-shadow values, including a
+  `:hover` state that used the same green independently — all retinted to
+  Citadel's own `--accent-bright`, `#28c8ff`), and the landmass fill color
+  on the canvas-based World Map/Satellite ground-track maps (`#3a5f3a` in
+  `lib/mapCanvas.ts`, retinted to Citadel's own `--gray`, `#5b7386`, kept
+  lighter than the canvas ocean fill so land/water stay distinguishable).
+  Also caught two hardcoded `rgba(57, 217, 122, ...)` text-shadow glows
+  (the rig-frequency display and the header clock) that were paired with
+  `color: var(--green)` but didn't follow the variable when its value
+  changed — fixed to the matching blue glow. Re-ran the full hex/rgb sweep
+  afterward: zero genuinely green hues remain anywhere in `app/src`, the
+  only surviving matches are inside this changelog's own prose.
+  **The actual running app was rebuilt and relaunched to verify this for
+  real** — the installed release binary Frank was using still had the
+  original pre-edit amber/green look baked in (a real gap all today's
+  earlier "verified live" claims missed, since those only checked the
+  Vite dev-server preview, never the actual compiled app) — confirmed
+  fixed once `cargo build --release` picked up the current `dist/` and the
+  app was relaunched. **Scope note**: this is the
+  color palette only — `tauri.conf.json`'s `productName`/window title are
+  still the bare `"Waystation"`, unchanged, per the correction in the entry
+  below. The original 2026-09-05 rationale for the amber/green "command
+  center" look (real ham-operator feedback on early mockups) is worth
+  remembering if this crosses live testers' desks and draws comment — this
+  was Frank's own explicit call to prioritize ecosystem-wide visual
+  consistency over that original standalone identity, not a silent drift.
+- **2026-09-23 (vault-api compatibility: `citadel_vault_token`)** — Real follow-up to
+  Citadel's own vault-api fix (2026-09-21) for a live-reported vulnerability: every
+  `vault-api` `/api/` route now requires an `X-Vault-Token` header. `citadel_scanner.rs`
+  and `transcription.rs` call those same routes directly (scanner status/config,
+  recordings, transcription), so without this fix they'd start getting honest 401s the
+  next time the hardware/scanner module is actually enabled. New `station_profile`
+  column (migration v49), same manually-entered pattern as `citadel_map_host` — the
+  value lives on Citadel's own Settings page, which now displays and offers to copy it,
+  not something WayStation can discover on its own. Not an active regression on the one
+  live install today (the hardware/scanner module isn't enabled there), but needed
+  before that integration is relied on again. 142 tests passing, clean TypeScript build.
+- **2026-09-20 (v0.1.1 point release — real System Health fix)** — A live Windows
+  tester reported every keystroke on the first-run setup screen taking 30-60 seconds,
+  escalating to a full "Not Responding" freeze. Root cause traced to
+  `system_health.rs`'s 3-second poller reconstructing its `Disks`/`Components` lists
+  from scratch every cycle — a full disk/volume re-enumeration plus, on Windows, a WMI
+  hardware-sensor re-query, both known to occasionally stall for seconds, worse
+  alongside Docker Desktop's WSL2 virtual disks. Fixed by keeping one persistent
+  `Disks`/`Components` instance in `SystemHealthState` (the same pattern this file
+  already used correctly for `System`) and calling the real incremental `.refresh()`
+  instead of `new_with_refreshed_list()` every cycle — confirmed against `sysinfo`
+  0.32's actual source that `.refresh()` takes no arguments and doesn't re-enumerate,
+  just refreshes already-known entries. This is the first real point release since
+  `v0.1.0`: version bumped to `0.1.1` across `package.json`/`Cargo.toml`/
+  `tauri.conf.json`/`Cargo.lock`, tagged and shipped through the existing
+  `release.yml` pipeline. Genuine, real field-test value: this is exactly the kind of
+  bug the offline field test exists to surface, and it surfaced fast.
+- **2026-09-18 (partial: new app icon + README logo, not a real rebrand)** —
+  Regenerated WayStation's full Tauri icon set (desktop `.ico`/`.icns`, all PNG sizes,
+  Windows Store logos) from the new ecosystem emblem via the official `tauri icon`
+  tool, and added the brand lockup image to the top of the README. **Corrected
+  2026-09-24 — this was mischaracterized as "the rebrand is done" and it isn't:**
+  `tauri.conf.json`'s `productName` and window `title` are both still the bare
+  `"Waystation"`, and there is zero mention of "Citadel Ecosystem" anywhere in the
+  actual app source (`app/src` — checked directly, not assumed). What actually
+  happened is an icon swap and a README image; the app itself — window title, any
+  in-app about/brand surface, the product name a user actually sees while running it —
+  still presents as standalone WayStation. A real rebrand (product name, window title,
+  in-app branding) is still open work, not done, and the ecosystem-wide vector brand
+  crest itself remains unbuilt per the Master Roadmap's own Stage 7.
 - **2026-09-15 (Muster spun off, WSP/1-over-mesh gap surfaced — documentation only, field
   test unaffected)** — Planning work on a new sibling project, **Muster** (a lightweight
   browser/PWA ops-coordination tool answering XTOC's confirmed mobile/PWA-reach advantage —

@@ -7,7 +7,7 @@ import Freshness from "../staleness/Freshness";
 import AlertsPanel from "./AlertsPanel";
 import { buildDayStrip, feelsLikeF } from "../lib/weatherMath";
 import { ONLINE_STYLE, citadelBase, citadelStyle, probeReachable } from "../lib/citadelMapStyle";
-import { RADAR_LAYER_ID, RADAR_SOURCE_ID, fetchLatestRadarTileTemplate } from "../lib/radar";
+import { RADAR_LAYER_ID, RADAR_SOURCE_ID, fetchRadarFrames, type RadarFrame } from "../lib/radar";
 
 // Mirrors db::ForecastPeriod.
 interface ForecastPeriod {
@@ -322,15 +322,21 @@ function StationsTab({ obs }: { obs: LocalWeatherObservation | null }) {
   );
 }
 
+const RADAR_FRAME_INTERVAL_MS = 500;
+
 /** Lightweight reuse of the Tactical Map's own citadel/online style
  * resolution and RainViewer overlay -- deliberately not a second radar
  * integration, no incident markers or pin tools, just a base map plus
- * the same live composite radar layer. */
+ * the same live composite radar layer, now animated over RainViewer's
+ * own recent-frame history instead of showing only the single latest one. */
 function RadarTab() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [tileSource, setTileSource] = useState<"citadel" | "online" | null>(null);
   const [radarError, setRadarError] = useState<string | null>(null);
+  const [frames, setFrames] = useState<RadarFrame[] | null>(null);
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -350,13 +356,16 @@ function RadarTab() {
       mapRef.current = map;
 
       map.on("load", async () => {
-        const template = await fetchLatestRadarTileTemplate();
+        const seq = await fetchRadarFrames();
         if (cancelled || !mapRef.current) return;
-        if (!template) {
+        if (!seq) {
           setRadarError("Could not reach RainViewer for radar imagery — this needs internet, no offline fallback.");
           return;
         }
-        map.addSource(RADAR_SOURCE_ID, { type: "raster", tiles: [template], tileSize: 256 });
+        const lastIndex = seq.length - 1;
+        setFrames(seq);
+        setFrameIndex(lastIndex);
+        map.addSource(RADAR_SOURCE_ID, { type: "raster", tiles: [seq[lastIndex].tileTemplate], tileSize: 256 });
         map.addLayer({ id: RADAR_LAYER_ID, type: "raster", source: RADAR_SOURCE_ID, paint: { "raster-opacity": 0.7 } });
       });
     }
@@ -369,15 +378,56 @@ function RadarTab() {
     };
   }, []);
 
+  // Advance through the fetched frame sequence while playing.
+  useEffect(() => {
+    if (!playing || !frames || frames.length < 2) return;
+    const id = setInterval(() => {
+      setFrameIndex((i) => (i + 1) % frames.length);
+    }, RADAR_FRAME_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [playing, frames]);
+
+  // Push whichever frame is current onto the map's existing raster source --
+  // same setTiles-based refresh technique as Cloud9's own live radar layer.
+  useEffect(() => {
+    if (!frames) return;
+    const source = mapRef.current?.getSource(RADAR_SOURCE_ID) as maplibregl.RasterTileSource | undefined;
+    source?.setTiles([frames[frameIndex].tileTemplate]);
+  }, [frames, frameIndex]);
+
+  const currentFrameTime =
+    frames && frames[frameIndex]
+      ? new Date(frames[frameIndex].time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : null;
+
   return (
     <div>
       <div className="bandplan-disclaimer">
-        Live composite radar from RainViewer (free, no key) — the most recent single frame, not an animated loop
-        yet. This is RainViewer's own radar mosaic, not a direct NWS NEXRAD feed. Needs internet; there's no
-        offline radar source.
+        Live composite radar from RainViewer (free, no key) — an animated loop over its real recent-frame history
+        (typically the last ~2 hours). This is RainViewer's own radar mosaic, not a direct NWS NEXRAD feed. Needs
+        internet; there's no offline radar source.
       </div>
       {radarError && <div className="panel-alerts-empty tactical-map-error">{radarError}</div>}
       <div ref={containerRef} className="tactical-map-canvas weather-radar-canvas" />
+      {frames && frames.length > 1 && (
+        <div className="weather-radar-controls">
+          <button type="button" className="weather-link-btn" onClick={() => setPlaying((p) => !p)}>
+            {playing ? "Pause" : "Play"}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={frames.length - 1}
+            value={frameIndex}
+            onChange={(e) => {
+              setPlaying(false);
+              setFrameIndex(Number(e.target.value));
+            }}
+            className="weather-radar-scrubber"
+          />
+          {currentFrameTime && <span className="tactical-map-source">{currentFrameTime}</span>}
+        </div>
+      )}
       {tileSource && <div className="tactical-map-source">Base tiles: {tileSource === "citadel" ? "Citadel (local)" : "OpenFreeMap (online)"}</div>}
     </div>
   );
