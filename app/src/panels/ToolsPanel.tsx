@@ -120,13 +120,33 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
 
 function ToolsPanel() {
   const [tab, setTab] = useState<Tab>("Overview");
+  // Rig/Rotator each got a real Settings > Modules toggle in this same
+  // pass (2026-09-25) -- hides Radio Control entirely when both are off,
+  // same "a disabled module isn't in the UI at all" convention Mesh's own
+  // tab in MessagingPanel.tsx just adopted, and shows just the one that's
+  // still on if only one is disabled.
+  const [rigEnabled, setRigEnabled] = useState(true);
+  const [rotatorEnabled, setRotatorEnabled] = useState(true);
+
+  useEffect(() => {
+    invoke<{ rig_enabled: boolean; rotator_enabled: boolean }>("get_station_profile").then((p) => {
+      setRigEnabled(p.rig_enabled);
+      setRotatorEnabled(p.rotator_enabled);
+    });
+  }, []);
+
+  const radioControlVisible = rigEnabled || rotatorEnabled;
+  const visibleTabs = TABS.filter((t) => radioControlVisible || t !== "Radio Control");
+  useEffect(() => {
+    if (!radioControlVisible && tab === "Radio Control") setTab("Overview");
+  }, [radioControlVisible, tab]);
 
   return (
     <div className="panel-weather">
       <p className="sync-lede">Radio hardware control and the RF/antenna math that goes with field operating.</p>
 
       <div className="panel-tabs">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button key={t} type="button" className={t === tab ? "panel-tab-btn active" : "panel-tab-btn"} onClick={() => setTab(t)}>
             {t}
           </button>
@@ -137,14 +157,18 @@ function ToolsPanel() {
         {tab === "Overview" && <OverviewTab goTo={setTab} />}
         {tab === "Radio Control" && (
           <div className="weather-overview-grid">
-            <div className="sync-section">
-              <div className="sync-section-head"><h3>Rig Control</h3></div>
-              <RigControlPanel />
-            </div>
-            <div className="sync-section">
-              <div className="sync-section-head"><h3>Rotator Control</h3></div>
-              <RotatorControlPanel />
-            </div>
+            {rigEnabled && (
+              <div className="sync-section">
+                <div className="sync-section-head"><h3>Rig Control</h3></div>
+                <RigControlPanel />
+              </div>
+            )}
+            {rotatorEnabled && (
+              <div className="sync-section">
+                <div className="sync-section-head"><h3>Rotator Control</h3></div>
+                <RotatorControlPanel />
+              </div>
+            )}
           </div>
         )}
         {tab === "Antenna Tools" && <AntennaCalculatorPanel />}

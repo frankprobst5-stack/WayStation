@@ -335,8 +335,27 @@ fn clear_connection(mesh_state: &MeshState) {
     *mesh_state.target.lock().expect("mesh state mutex poisoned") = None;
 }
 
+/// Same real pattern rig.rs's own `rig_enabled` already proved: checked
+/// live on every loop iteration, not just once at spawn time, so toggling
+/// this in the "Modules" panel takes effect on the very next cycle -- no
+/// app restart needed.
+fn mesh_enabled(app: &AppHandle) -> bool {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().expect("db mutex poisoned");
+    db::station_profile(&conn).mesh_enabled
+}
+
 pub fn spawn_poller(app: AppHandle) {
     std::thread::spawn(move || loop {
+        if !mesh_enabled(&app) {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().expect("db mutex poisoned");
+            connectivity::report_source_health(&conn, SOURCE_ID, "Meshtastic", Status::Degraded, Via::Mesh, Some("Switched off in Settings."));
+            drop(conn);
+            std::thread::sleep(RECONNECT_DELAY);
+            continue;
+        }
+
         if let Err(detail) = run_connection(&app) {
             let db = app.state::<Db>();
             let conn = db.0.lock().expect("db mutex poisoned");
@@ -367,6 +386,10 @@ pub struct MeshStatus {
     /// What the live connection is actually pointed at, or — when
     /// disconnected — what the next attempt will use.
     pub target: String,
+    /// Same reasoning as `RigStatus.enabled` -- lets the UI say "switched
+    /// off in Settings" instead of a bare, potentially confusing
+    /// "not connected" when this is off by choice, not a real failure.
+    pub enabled: bool,
 }
 
 #[tauri::command]
@@ -380,6 +403,7 @@ pub fn get_mesh_status(app: AppHandle, mesh_state: State<MeshState>) -> MeshStat
             .expect("mesh state mutex poisoned")
             .map(|n| n as i64),
         target: live_target.unwrap_or_else(|| mesh_target(&app)),
+        enabled: mesh_enabled(&app),
     }
 }
 

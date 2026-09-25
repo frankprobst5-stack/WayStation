@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import StationIdentityPanel from "./StationIdentityPanel";
+import ModulesPanel from "./ModulesPanel";
 import AppearancePanel from "./AppearancePanel";
 import RequiredSoftwarePanel from "./RequiredSoftwarePanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
@@ -14,17 +15,21 @@ import AboutPanel from "./AboutPanel";
 //
 // The mockup splits Station / Connections / Integrations into three
 // separate tabs, each with its own per-item Enabled toggle and gear icon.
-// The real StationIdentityPanel is one combined form -- station identity
-// (callsign, grid, operator) and every connection host (mesh, rigctld,
-// rotctld, Citadel map server, local weather station, Citadel Kiwix,
-// Direwolf audio device) all save together as one profile, not as
-// separately toggleable integrations. Splitting that into three tabs here
-// would mean actually restructuring StationIdentityPanel's form and save
-// logic, not just moving components around -- a real feature, not a
-// consolidation, so left as one "Station" tab and named honestly below.
+// The real StationIdentityPanel is still one combined form -- station
+// identity and every connection host (mesh, rigctld, rotctld, Citadel map
+// server, local weather station, Citadel Kiwix, Direwolf audio device) all
+// save together as one profile -- restructuring that into per-item tabs
+// would mean rebuilding the form itself, not just moving components, so it
+// stays one "Station" tab. What IS real now (2026-09-25, WayStation's own
+// modularization work starting for real): a genuine "Modules" tab with
+// per-item Enabled toggles for the local-hardware integrations that have
+// one (Mesh, Rig, Rotator so far) -- see ModulesPanel.tsx and the Citadel
+// Ecosystem ARCHITECTURE.md's "Module conventions" section. It's additive,
+// not a replacement: Station's own rig_enabled/rotator_enabled checkboxes
+// still work exactly as before, both surfaces write the same columns.
 // Likewise, no separate "Data & Storage" usage panel exists.
 
-const TABS = ["Overview", "Station", "Appearance", "Required Software", "Diagnostics", "Sync", "About"] as const;
+const TABS = ["Overview", "Station", "Modules", "Appearance", "Required Software", "Diagnostics", "Sync", "About"] as const;
 type Tab = (typeof TABS)[number];
 
 interface StationProfile { callsign: string | null; grid_square: string | null }
@@ -74,6 +79,10 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
         </div>
       </SummaryCard>
 
+      <SummaryCard title="Modules" onView={() => goTo("Modules")}>
+        <div className="alert-card"><div className="alert-area">Pick only the local-hardware capability this station needs.</div></div>
+      </SummaryCard>
+
       <SummaryCard title="Appearance" onView={() => goTo("Appearance")}>
         <div className="alert-card"><div className="alert-area">Theme, including a real red night-vision mode.</div></div>
       </SummaryCard>
@@ -101,11 +110,11 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
           <h3>Not built yet</h3>
         </div>
         <div className="bandplan-disclaimer">
-          The mockup splits Station/Connections/Integrations into three separate tabs, each with its own per-item
-          Enabled toggle. The real Station tab is one combined form -- identity and every connection host save
-          together as one profile. Splitting that apart would mean restructuring the form itself, not just moving
-          it into a new tab, so it stays as one "Station" tab for now. A separate "Data & Storage" usage panel
-          doesn't exist either.
+          The mockup's per-item Enabled toggles are real now for Mesh/Rig/Rotator — see the new Modules tab above.
+          Winlink/JS8Call/Packet don't have one yet (each manages a real subprocess, not just a poller — see
+          Modules' own note). The Station tab itself is still one combined form rather than split into
+          Station/Connections/Integrations, since that would mean restructuring the form, not just moving it. A
+          separate "Data & Storage" usage panel doesn't exist either.
         </div>
       </div>
     </div>
@@ -130,6 +139,7 @@ function SettingsPanel() {
       <div className="panel-tab-content">
         {tab === "Overview" && <OverviewTab goTo={setTab} />}
         {tab === "Station" && <StationIdentityPanel />}
+        {tab === "Modules" && <ModulesPanel />}
         {tab === "Appearance" && <AppearancePanel />}
         {tab === "Required Software" && <RequiredSoftwarePanel />}
         {tab === "Diagnostics" && <DiagnosticsPanel />}

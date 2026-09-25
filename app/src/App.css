@@ -1435,6 +1435,79 @@ body {
   font-size: 0.7rem;
 }
 
+/* Modules panel (Settings > Modules) -- a real switch, not a checkbox,
+   matching Citadel's own Settings > Modules toggle UX. */
+.module-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+}
+
+.module-row-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.module-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.module-row-title {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.module-row-badge {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.module-toggle {
+  flex-shrink: 0;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background 0.15s ease;
+}
+
+.module-toggle-on {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.module-toggle-knob {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  transition: transform 0.15s ease;
+}
+
+.module-toggle-on .module-toggle-knob {
+  transform: translateX(18px);
+}
+
+.module-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .resource-actions {
   display: flex;
   gap: 0.4rem;

@@ -111,6 +111,15 @@ pub struct StationProfile {
     /// (`set_theme`), not a Station-form field, carried through
     /// unchanged whenever the Station form saves.
     pub theme: String,
+    /// Whether the Meshtastic poller should even try to connect. Same
+    /// reasoning as `rig_enabled`/`rotator_enabled`: off means Waystation
+    /// opens no connection and does no polling. Not a Station-form field --
+    /// this is set through the ecosystem-wide module-convention "Modules"
+    /// panel (see `ModulesPanel.tsx` and the Citadel Ecosystem
+    /// `ARCHITECTURE.md`'s "Module conventions" section, resolved
+    /// 2026-09-25), via its own `set_mesh_enabled` command, same
+    /// instant-apply pattern as `tactical_mode`.
+    pub mesh_enabled: bool,
     pub updated_at: Option<String>,
 }
 
@@ -146,6 +155,7 @@ impl Default for StationProfile {
             direwolf_audio_device: None,
             signing_secret: None,
             theme: "dark".to_string(),
+            mesh_enabled: true,
             updated_at: None,
         }
     }
@@ -153,7 +163,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -176,7 +186,8 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 citadel_kiwix_host: row.get(16)?,
                 direwolf_audio_device: row.get(17)?,
                 citadel_vault_token: row.get(18)?,
-                updated_at: row.get(19)?,
+                mesh_enabled: row.get::<_, i64>(19)? != 0,
+                updated_at: row.get(20)?,
             })
         },
     )
@@ -243,6 +254,85 @@ pub fn set_tactical_mode(db: State<Db>, enabled: bool) -> StationProfile {
     station_profile(&conn)
 }
 
+/// Own command, same reasoning as `set_tactical_mode` -- the ecosystem-wide
+/// "Modules" panel (see `ModulesPanel.tsx`) toggles this instantly, not
+/// through the Station form's Save button. Purely additive: the existing
+/// Station form still writes this same column via `save_station_profile`
+/// too (that path is untouched), so both surfaces stay correct together.
+#[tauri::command]
+pub fn set_mesh_enabled(db: State<Db>, enabled: bool) -> StationProfile {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET mesh_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update mesh_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, mesh_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for mesh_enabled");
+    }
+    station_profile(&conn)
+}
+
+/// Same reasoning as `set_mesh_enabled` above -- lets the "Modules" panel
+/// toggle rig control instantly. The existing Station form's `rig_enabled`
+/// checkbox (saved via `save_station_profile`) is untouched and keeps
+/// working exactly as before; both write the same column.
+#[tauri::command]
+pub fn set_rig_enabled(db: State<Db>, enabled: bool) -> StationProfile {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET rig_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update rig_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, rig_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for rig_enabled");
+    }
+    station_profile(&conn)
+}
+
+/// Same reasoning as `set_rig_enabled` above, for rotator control.
+#[tauri::command]
+pub fn set_rotator_enabled(db: State<Db>, enabled: bool) -> StationProfile {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET rotator_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update rotator_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, rotator_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for rotator_enabled");
+    }
+    station_profile(&conn)
+}
+
 #[tauri::command]
 pub fn get_station_profile(db: State<Db>) -> StationProfile {
     let conn = db.0.lock().expect("db mutex poisoned");
@@ -278,6 +368,7 @@ fn save_station_profile_conn(
     let tactical_mode = existing.tactical_mode;
     let signing_secret = existing.signing_secret;
     let theme = existing.theme;
+    let mesh_enabled = existing.mesh_enabled;
     conn.execute(
         "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, citadel_vault_token, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, updated_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
@@ -322,6 +413,7 @@ fn save_station_profile_conn(
         direwolf_audio_device,
         signing_secret,
         theme,
+        mesh_enabled,
         updated_at: Some(now),
     }
 }
@@ -4669,6 +4761,20 @@ const MIGRATIONS: &[&str] = &[
         barometric_pressure_inhg  REAL,
         visibility_mi             REAL
     );
+    "#,
+    // v53: mesh_enabled, decided 2026-09-25 -- WayStation's own
+    // modularization work starting for real, first application of the
+    // ecosystem-wide module-convention convergence resolved the same day
+    // (Citadel Ecosystem ARCHITECTURE.md's "Module conventions" section).
+    // Mesh (Meshtastic) had no enable/disable of its own at all before this
+    // -- its poller always ran unconditionally -- unlike rig_enabled/
+    // rotator_enabled (migration v21), which already proved this exact
+    // pattern. DEFAULT 1 for the same reason v21's comment gives: an
+    // existing install already relies on mesh working today, so "on" must
+    // stay the real default, not silently turn mesh off for everyone on
+    // upgrade.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN mesh_enabled INTEGER NOT NULL DEFAULT 1;
     "#,
 ];
 
