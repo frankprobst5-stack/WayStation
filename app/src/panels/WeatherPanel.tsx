@@ -112,6 +112,37 @@ function useAlertSummaries() {
   return alerts;
 }
 
+// Mirrors db::SpcOutlookArea.
+interface SpcOutlookArea {
+  id: number;
+  fetched_at: string;
+  dn: number;
+  label: string;
+  label2: string;
+  fill: string;
+  stroke: string;
+  valid: string | null;
+  expire: string | null;
+  issue: string | null;
+  geometry_json: string;
+}
+
+function useSpcOutlook() {
+  const [areas, setAreas] = useState<SpcOutlookArea[] | null>(null);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    async function refresh() {
+      setAreas(await invoke<SpcOutlookArea[]>("get_spc_outlook"));
+    }
+    refresh();
+    listen("spc-outlook-changed", refresh).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+  return areas;
+}
+
 function CurrentConditionsCard({ obs }: { obs: LocalWeatherObservation | null }) {
   if (!obs || !obs.source) {
     return (
@@ -333,6 +364,26 @@ const ALERT_SOURCE_ID = "nws-alert-polygons";
 const ALERT_FILL_LAYER_ID = "nws-alert-polygons-fill";
 const ALERT_LINE_LAYER_ID = "nws-alert-polygons-line";
 
+const OUTLOOK_SOURCE_ID = "spc-outlook-areas";
+const OUTLOOK_FILL_LAYER_ID = "spc-outlook-areas-fill";
+const OUTLOOK_LINE_LAYER_ID = "spc-outlook-areas-line";
+
+function outlookToGeoJson(areas: SpcOutlookArea[]): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const a of areas) {
+    try {
+      features.push({
+        type: "Feature",
+        geometry: JSON.parse(a.geometry_json),
+        properties: { label: a.label, label2: a.label2, fill: a.fill, stroke: a.stroke },
+      });
+    } catch {
+      // One malformed stored shape shouldn't take the whole overlay down.
+    }
+  }
+  return { type: "FeatureCollection", features };
+}
+
 // Matches this app's existing severity color convention (App.css's
 // .alert-card.severity-* rules) -- hardcoded hex rather than CSS vars
 // since MapLibre paint expressions can't read custom properties, same
@@ -372,8 +423,10 @@ function alertsToGeoJson(alerts: AlertSummary[]): GeoJSON.FeatureCollection {
  * request from a storm-chaser tester) using the same alert data already
  * fetched for the Alerts tab -- no second fetch, no third-party WMS
  * overlay, just the geometry api.weather.gov was already sending and this
- * app was already discarding. */
-function RadarTab({ alerts }: { alerts: AlertSummary[] | null }) {
+ * app was already discarding -- plus SPC's real Day 1 convective outlook,
+ * same day, drawn beneath the radar/alert layers as broader risk-area
+ * context using SPC's own real fill/stroke colors. */
+function RadarTab({ alerts, outlook }: { alerts: AlertSummary[] | null; outlook: SpcOutlookArea[] | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [tileSource, setTileSource] = useState<"citadel" | "online" | null>(null);
@@ -409,6 +462,33 @@ function RadarTab({ alerts }: { alerts: AlertSummary[] | null }) {
         const lastIndex = seq.length - 1;
         setFrames(seq);
         setFrameIndex(lastIndex);
+        // Outlook first (bottom): broad, low-key risk-area context using
+        // SPC's own real pastel fill/stroke colors, sitting beneath the
+        // sharper, more urgent radar and alert layers below.
+        map.addSource(OUTLOOK_SOURCE_ID, { type: "geojson", data: outlookToGeoJson(outlook ?? []) });
+        map.addLayer({
+          id: OUTLOOK_FILL_LAYER_ID,
+          type: "fill",
+          source: OUTLOOK_SOURCE_ID,
+          paint: { "fill-color": ["get", "fill"], "fill-opacity": 0.45 },
+        });
+        map.addLayer({
+          id: OUTLOOK_LINE_LAYER_ID,
+          type: "line",
+          source: OUTLOOK_SOURCE_ID,
+          paint: { "line-color": ["get", "stroke"], "line-width": 1.5 },
+        });
+        map.on("click", OUTLOOK_FILL_LAYER_ID, (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          new maplibregl.Popup({ offset: 8 })
+            .setLngLat(e.lngLat)
+            .setHTML(`<strong>${f.properties?.label2 ?? "SPC Outlook"}</strong><br/>Storm Prediction Center Day 1 Outlook`)
+            .addTo(map);
+        });
+        map.on("mouseenter", OUTLOOK_FILL_LAYER_ID, () => (map.getCanvas().style.cursor = "pointer"));
+        map.on("mouseleave", OUTLOOK_FILL_LAYER_ID, () => (map.getCanvas().style.cursor = ""));
+
         map.addSource(RADAR_SOURCE_ID, { type: "raster", tiles: [seq[lastIndex].tileTemplate], tileSize: 256 });
         map.addLayer({ id: RADAR_LAYER_ID, type: "raster", source: RADAR_SOURCE_ID, paint: { "raster-opacity": 0.7 } });
 
@@ -480,6 +560,15 @@ function RadarTab({ alerts }: { alerts: AlertSummary[] | null }) {
     source?.setData(alertsToGeoJson(alerts ?? []));
   }, [alerts]);
 
+  // Same idea for the SPC outlook overlay -- useSpcOutlook() polls on its
+  // own 30-minute cadence, independent of this map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource(OUTLOOK_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(outlookToGeoJson(outlook ?? []));
+  }, [outlook]);
+
   const currentFrameTime =
     frames && frames[frameIndex]
       ? new Date(frames[frameIndex].time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -490,13 +579,25 @@ function RadarTab({ alerts }: { alerts: AlertSummary[] | null }) {
       <div className="bandplan-disclaimer">
         Live composite radar from RainViewer (free, no key) — an animated loop over its real recent-frame history
         (typically the last ~2 hours) — plus real NWS watch/warning polygons for this station's area, shaded by
-        severity and clickable for details. This is RainViewer's own radar mosaic, not a direct NWS NEXRAD feed.
-        Needs internet; there's no offline radar source.
+        severity, and the Storm Prediction Center's real Day 1 convective outlook as broader risk-area context
+        beneath both. Everything on this map is clickable for details. This is RainViewer's own radar mosaic, not
+        a direct NWS NEXRAD feed. Needs internet; there's no offline radar source.
       </div>
       {radarError && <div className="panel-alerts-empty tactical-map-error">{radarError}</div>}
       <div ref={containerRef} className="tactical-map-canvas weather-radar-canvas" />
+      {outlook && outlook.length > 0 && (
+        <div className="tactical-map-legend">
+          <span className="tactical-map-source">SPC Outlook:</span>
+          {outlook.map((a) => (
+            <span key={a.id}>
+              <span className="tactical-map-swatch" style={{ background: a.fill, border: `1px solid ${a.stroke}` }} /> {a.label}
+            </span>
+          ))}
+        </div>
+      )}
       {alerts && alerts.some((a) => a.geometry_json) && (
         <div className="tactical-map-legend">
+          <span className="tactical-map-source">NWS Alerts:</span>
           {Object.entries(SEVERITY_COLOR).map(([severity, color]) => (
             <span key={severity}>
               <span className="tactical-map-swatch" style={{ background: color }} /> {severity}
@@ -533,6 +634,7 @@ function WeatherPanel() {
   const obs = useLocalObservation();
   const periods = useForecast();
   const alerts = useAlertSummaries();
+  const outlook = useSpcOutlook();
 
   if (periods === null) {
     return <div className="panel-alerts">Loading...</div>;
@@ -558,7 +660,7 @@ function WeatherPanel() {
         {tab === "Overview" && <OverviewTab obs={obs} periods={periods} alerts={alerts} goTo={setTab} />}
         {tab === "NWS Forecast" && <NwsForecastTab periods={periods} />}
         {tab === "Alerts" && <AlertsPanel />}
-        {tab === "Radar" && <RadarTab alerts={alerts} />}
+        {tab === "Radar" && <RadarTab alerts={alerts} outlook={outlook} />}
         {tab === "Stations" && <StationsTab obs={obs} />}
       </div>
     </div>

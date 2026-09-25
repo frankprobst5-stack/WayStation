@@ -1614,6 +1614,84 @@ pub fn replace_alerts(conn: &mut Connection, source: &str, fetched_at: &str, ale
     tx.commit().expect("failed to commit alerts transaction");
 }
 
+/// One risk-category area from SPC's real Day 1 categorical outlook --
+/// "TSTM"/"MRGL"/"SLGT"/"ENH"/"MDT"/"HIGH", each a real polygon SPC itself
+/// draws, not a WayStation-derived shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct SpcOutlookArea {
+    pub id: i64,
+    pub fetched_at: String,
+    pub dn: i64,
+    pub label: String,
+    pub label2: String,
+    pub fill: String,
+    pub stroke: String,
+    pub valid: Option<String>,
+    pub expire: Option<String>,
+    pub issue: Option<String>,
+    pub geometry_json: String,
+}
+
+#[tauri::command]
+pub fn get_spc_outlook(db: State<Db>) -> Vec<SpcOutlookArea> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, fetched_at, dn, label, label2, fill, stroke, valid, expire, issue, geometry_json
+             FROM spc_outlook ORDER BY dn ASC",
+        )
+        .expect("failed to prepare spc_outlook query");
+    stmt.query_map([], |row| {
+        Ok(SpcOutlookArea {
+            id: row.get(0)?,
+            fetched_at: row.get(1)?,
+            dn: row.get(2)?,
+            label: row.get(3)?,
+            label2: row.get(4)?,
+            fill: row.get(5)?,
+            stroke: row.get(6)?,
+            valid: row.get(7)?,
+            expire: row.get(8)?,
+            issue: row.get(9)?,
+            geometry_json: row.get(10)?,
+        })
+    })
+    .expect("failed to query spc_outlook")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+/// Same replace-on-successful-fetch pattern as `IncomingForecastPeriod` --
+/// each poll is the current outlook, not an accumulating history.
+pub struct IncomingSpcOutlookArea {
+    pub dn: i64,
+    pub label: String,
+    pub label2: String,
+    pub fill: String,
+    pub stroke: String,
+    pub valid: Option<String>,
+    pub expire: Option<String>,
+    pub issue: Option<String>,
+    pub geometry_json: String,
+}
+
+pub fn replace_spc_outlook(conn: &mut Connection, source: &str, fetched_at: &str, areas: &[IncomingSpcOutlookArea]) {
+    let tx = conn.transaction().expect("failed to start spc_outlook transaction");
+    {
+        tx.execute("DELETE FROM spc_outlook WHERE source = ?1", params![source])
+            .expect("failed to clear old spc_outlook");
+        for a in areas {
+            tx.execute(
+                "INSERT INTO spc_outlook (source, fetched_at, via, dn, label, label2, fill, stroke, valid, expire, issue, geometry_json)
+                 VALUES (?1, ?2, 'internet', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![source, fetched_at, a.dn, a.label, a.label2, a.fill, a.stroke, a.valid, a.expire, a.issue, a.geometry_json],
+            )
+            .expect("failed to insert spc_outlook area");
+        }
+    }
+    tx.commit().expect("failed to commit spc_outlook transaction");
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct NetRosterEntry {
     pub id: i64,
@@ -4452,6 +4530,34 @@ const MIGRATIONS: &[&str] = &[
     // "no shape for this one" rather than a parse failure.
     r#"
     ALTER TABLE alerts ADD COLUMN geometry_json TEXT;
+    "#,
+    // v51: SPC convective outlook, decided 2026-09-25 -- second of the four
+    // real NWS map products named in the same 2026-09-16 field request as
+    // the alert-polygon layer above. Storm Prediction Center's real Day 1
+    // categorical outlook (spc.noaa.gov/products/outlook/*.nolyr.geojson)
+    // is a small national FeatureCollection, not a per-station point query
+    // -- same replace-on-successful-fetch pattern as forecast_periods,
+    // since each poll is the current outlook, not an accumulating history.
+    // fill/stroke are SPC's own real hex colors per risk category (verified
+    // live: a real fetched feature carries "fill": "#C1E9C1", "stroke":
+    // "#55BB55" alongside "LABEL": "TSTM") -- stored as-is rather than
+    // re-deriving a color scheme, so the map matches SPC's own convention.
+    r#"
+    CREATE TABLE spc_outlook (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        source     TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        via        TEXT NOT NULL,
+        dn         INTEGER NOT NULL,
+        label      TEXT NOT NULL,
+        label2     TEXT NOT NULL,
+        fill       TEXT NOT NULL,
+        stroke     TEXT NOT NULL,
+        valid      TEXT,
+        expire     TEXT,
+        issue      TEXT,
+        geometry_json TEXT NOT NULL
+    );
     "#,
 ];
 

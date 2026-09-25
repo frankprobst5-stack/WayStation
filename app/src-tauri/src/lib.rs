@@ -27,6 +27,7 @@ mod rig;
 mod rotator;
 mod satellite;
 mod space_weather;
+mod spc_outlook;
 mod sync;
 mod system_health;
 mod transcription;
@@ -117,6 +118,7 @@ pub fn run() {
             nws::spawn_poller(app.handle().clone());
             weather_station::spawn_poller(app.handle().clone());
             space_weather::spawn_poller(app.handle().clone());
+            spc_outlook::spawn_poller(app.handle().clone());
             contest_calendar::spawn_poller(app.handle().clone());
             pskreporter::spawn_poller(app.handle().clone());
             pota::spawn_poller(app.handle().clone());
@@ -234,6 +236,7 @@ pub fn run() {
             db::get_dx_spots,
             db::get_aircraft_tracks,
             db::get_forecast_periods,
+            db::get_spc_outlook,
             db::get_local_weather_observation,
             db::get_satellite_tles,
             db::get_qso_log,
