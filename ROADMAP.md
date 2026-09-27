@@ -493,6 +493,21 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-09-27 (Fixed the app's own name, closed the last rebrand gap)** — A full
+  case-sensitive sweep found "Waystation" (missing the internal capital) spelled that way
+  almost everywhere: `productName`/window title in `tauri.conf.json`, the browser/app-window
+  `<title>`, the sidebar brand header, dozens of in-app panel strings, every outbound HTTP
+  `USER_AGENT` (space weather, satellites, NWS, POTA, PSKReporter, RepeaterBook, SPC outlook,
+  flight tracking, contest calendar), and assorted Rust doc comments — all fixed to the real
+  "WayStation" spelling. Left alone on purpose: the all-lowercase technical identifiers
+  (`waystation` npm/crate name, the `com.waystation.app` bundle identifier, the
+  `waystation://` deep-link scheme) — those follow their own casing conventions and aren't a
+  spelling bug. Also closes the last item from the 2026-09-18 rebrand: the sidebar now shows
+  a small "Citadel Ecosystem" tag under the WayStation title, and the About panel names the
+  ecosystem explicitly ("Part of the Citadel Ecosystem — self-reliance is freedom"). Verified
+  live in the dev server (both spots render correctly, no layout overflow in the 185px
+  sidebar) and against the full test suite — 147 Rust tests passing, clean TypeScript build.
+
 - **2026-09-25 (JS8Call and Packet (APRS/Direwolf) module toggles — all six real
   local-hardware modules now done)** — Completes the six candidates named in the
   2026-09-15 architecture-initiative entry below: Mesh/Rig/Rotator and Winlink shipped
