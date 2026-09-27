@@ -112,7 +112,7 @@ function RigControlPanel() {
           <span>Rig control is off</span>
         </div>
         <div className="rig-hint">
-          Waystation isn't connecting to a radio. Turn it on in <strong>Settings → Station</strong>.
+          WayStation isn't connecting to a radio. Turn it on in <strong>Settings → Station</strong>.
         </div>
       </div>
     );
@@ -126,7 +126,7 @@ function RigControlPanel() {
           <span className="resource-chip">{status.target}</span>
         </div>
         <div className="rig-hint">
-          Waystation talks to your radio through <strong>rigctld</strong> (part of Hamlib), which it
+          WayStation talks to your radio through <strong>rigctld</strong> (part of Hamlib), which it
           does not start for you — a radio's serial port can only be opened by one program at a
           time, and you may already be sharing it with WSJT-X or a logger.
           <code className="rig-cmd">rigctld -m &lt;model&gt; -r /dev/ttyUSB0</code>
@@ -203,7 +203,7 @@ function RigControlPanel() {
       {/* Transmit is deliberately absent. Keying a radio should never be a
           stray click in a dashboard, and unattended transmission carries
           real regulatory weight. */}
-      <div className="rig-note">Frequency and mode only — Waystation will not key your transmitter.</div>
+      <div className="rig-note">Frequency and mode only — WayStation will not key your transmitter.</div>
     </div>
   );
 }

@@ -51,7 +51,7 @@ function Js8CallPanel() {
         <span>{status.callsign ?? "Connected"}</span>
       </div>
       <p className="field-hint">
-        This only means Waystation can reach JS8Call's local API — it doesn't mean JS8Call has a
+        This only means WayStation can reach JS8Call's local API — it doesn't mean JS8Call has a
         working radio and audio interface connected, or is actually decoding anything off the air.
       </p>
 

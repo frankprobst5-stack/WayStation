@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Takes Waystation off the internet without taking the computer off it.
+ * Takes WayStation off the internet without taking the computer off it.
  *
  * Scoped to internet sources only. Mesh, Winlink, JS8Call and rig control
  * keep running — "offline" for a ham dashboard means the internet is gone,
@@ -40,8 +40,8 @@ function OfflineToggle() {
       aria-pressed={offline}
       title={
         offline
-          ? "Waystation is not using the internet. Mesh, Winlink, JS8Call and rig control are unaffected. Click to reconnect."
-          : "Stop Waystation using the internet, without taking this computer offline. Mesh and RF keep working."
+          ? "WayStation is not using the internet. Mesh, Winlink, JS8Call and rig control are unaffected. Click to reconnect."
+          : "Stop WayStation using the internet, without taking this computer offline. Mesh and RF keep working."
       }
     >
       <span className="offline-toggle-track">

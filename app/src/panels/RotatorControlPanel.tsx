@@ -61,7 +61,7 @@ function RotatorControlPanel() {
           <span>Rotator control is off</span>
         </div>
         <div className="rig-hint">
-          Waystation isn't connecting to a rotator. Turn it on in <strong>Settings → Station</strong>.
+          WayStation isn't connecting to a rotator. Turn it on in <strong>Settings → Station</strong>.
         </div>
       </div>
     );
@@ -75,7 +75,7 @@ function RotatorControlPanel() {
           <span className="resource-chip">{status.target}</span>
         </div>
         <div className="rig-hint">
-          Waystation talks to your rotator through <strong>rotctld</strong> (part of Hamlib), which
+          WayStation talks to your rotator through <strong>rotctld</strong> (part of Hamlib), which
           it does not start for you — you may already be sharing it with other software.
           <code className="rig-cmd">rotctld -m &lt;model&gt; -r /dev/ttyUSB0</code>
           Run <code>rotctl --list</code> to find your model number. Model 1 is a dummy rotator for

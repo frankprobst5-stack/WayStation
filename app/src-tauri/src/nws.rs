@@ -20,7 +20,7 @@ const SOURCE_ID: &str = "nws-alerts";
 const FORECAST_SOURCE_ID: &str = "nws-forecast";
 const CURRENT_OBS_SOURCE_ID: &str = "nws-current-observation";
 const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60); // NWS asks clients not to poll more often
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 #[derive(Debug, Deserialize)]
 struct AlertsResponse {

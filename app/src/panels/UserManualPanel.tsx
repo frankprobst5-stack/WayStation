@@ -91,7 +91,7 @@ function TabContent({ id }: { id: string }) {
               machine up where that is, and write it down here for next time.
             </li>
             <li>
-              You should see a dark screen with <strong>Waystation</strong> in gold at the top-left, and a column of
+              You should see a dark screen with <strong>WayStation</strong> in gold at the top-left, and a column of
               links below it: Dashboard, EmComm, Messaging, Activity, Reference, Tools, Settings, User Manual. If you
               see that, the software is working.
             </li>

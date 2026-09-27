@@ -30,7 +30,7 @@ const FEED_URL: &str = "https://celestrak.org/NORAD/elements/gp.php?GROUP=amateu
 // CelesTrak's own guidance: GP data only changes every ~2 hours, no need
 // to check more often. This polls every 6, comfortably above that floor.
 const POLL_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 const EARTH_RADIUS_KM: f64 = 6378.135; // spherical Earth model, per Kelso's reference formulas
 const EARTH_ROTATION_RAD_PER_SEC: f64 = 7.29211510e-5; // ωe, per Kelso

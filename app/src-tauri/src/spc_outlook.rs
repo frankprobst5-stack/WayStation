@@ -31,7 +31,7 @@ const OUTLOOK_URL: &str = "https://www.spc.noaa.gov/products/outlook/day1otlk_ca
 // hammering a free government feed, same cadence this app already uses for
 // space_weather.rs's similarly slow-changing N0NBH feed.
 const POLL_INTERVAL: Duration = Duration::from_secs(30 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 #[derive(Debug, Deserialize)]
 struct OutlookResponse {

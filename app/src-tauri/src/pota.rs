@@ -20,7 +20,7 @@ const FEED_URL: &str = "https://api.pota.app/spot/activator";
 // POTA's own docs note the API "expects caching" — spots churn every few
 // minutes in practice, so this stays well above their minimum interest.
 const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 #[derive(Deserialize)]
 struct RawSpot {

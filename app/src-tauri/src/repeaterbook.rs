@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::time::Duration;
 use tauri::{Manager, State};
 
-const USER_AGENT: &str = "Waystation/0.1 (+https://github.com/frankprobst5-stack/WayStation; contact via GitHub issues)";
+const USER_AGENT: &str = "WayStation/0.1 (+https://github.com/frankprobst5-stack/WayStation; contact via GitHub issues)";
 
 fn us_state_fips(abbr: &str) -> Option<&'static str> {
     Some(match abbr.to_uppercase().as_str() {

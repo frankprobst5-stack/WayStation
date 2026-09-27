@@ -121,7 +121,7 @@ pub struct ConnectivitySnapshot {
     pub sources: Vec<SourceHealth>,
 }
 
-/// True when the operator has switched Waystation off the internet.
+/// True when the operator has switched WayStation off the internet.
 ///
 /// Deliberately scoped to *internet* sources. "Offline" for a ham
 /// dashboard cannot mean "stop all communication" — the whole premise is
@@ -138,7 +138,7 @@ pub fn is_manual_offline(app: &AppHandle) -> bool {
 }
 
 
-/// Returns true when the operator has switched Waystation offline, and
+/// Returns true when the operator has switched WayStation offline, and
 /// records that as this source's reason for not updating.
 ///
 /// Reporting it rather than silently skipping matters: a paused source
@@ -157,7 +157,7 @@ pub fn paused_for_offline(app: &AppHandle, source_id: &str, label: &str) -> bool
         label,
         Status::Degraded,
         Via::Internet,
-        Some("Paused — Waystation is switched offline by the operator."),
+        Some("Paused — WayStation is switched offline by the operator."),
     );
     true
 }
@@ -274,7 +274,7 @@ pub fn poll_once(app: &AppHandle) {
     // the network, which is exactly the kind of quiet dishonesty this
     // toggle exists to let people test for.
     let (status, detail) = if is_manual_offline(app) {
-        (Status::Degraded, Some("Waystation is switched offline by the operator.".to_string()))
+        (Status::Degraded, Some("WayStation is switched offline by the operator.".to_string()))
     } else {
         probe_internet()
     };

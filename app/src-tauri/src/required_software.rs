@@ -1,4 +1,4 @@
-//! Detection status for external programs Waystation orchestrates or
+//! Detection status for external programs WayStation orchestrates or
 //! connects to. Detection-only, deliberately: checks the filesystem for
 //! a matching binary, never executes one. Actually running an unknown
 //! copy of JS8Call/meshtasticd/rigctld to "check" it risks launching a
@@ -72,14 +72,14 @@ pub fn get_required_software() -> Vec<SoftwareEntry> {
             name: "Pat (Winlink)",
             detected: detect(&["pat", "pat.exe"]),
             install_url: "https://github.com/la5nta/pat/releases",
-            note: "Waystation launches and manages this one for you once it's installed.",
+            note: "WayStation launches and manages this one for you once it's installed.",
         },
         SoftwareEntry {
             id: "js8call",
             name: "JS8Call",
             detected: detect(&["js8call", "JS8Call", "js8call.exe"]),
             install_url: "https://js8call.com/downloads.html",
-            note: "Runs on its own -- Waystation only connects to its TCP API, and never launches it.",
+            note: "Runs on its own -- WayStation only connects to its TCP API, and never launches it.",
         },
         SoftwareEntry {
             id: "meshtasticd",
@@ -93,7 +93,7 @@ pub fn get_required_software() -> Vec<SoftwareEntry> {
             name: "Hamlib (rigctld / rotctld)",
             detected: detect(&["rigctld", "rigctld.exe"]) || detect(&["rotctld", "rotctld.exe"]),
             install_url: "https://github.com/Hamlib/Hamlib/releases",
-            note: "Powers both Rig Control and Rotator Control -- Waystation connects to one already running, never starts it.",
+            note: "Powers both Rig Control and Rotator Control -- WayStation connects to one already running, never starts it.",
         },
     ]
 }

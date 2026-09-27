@@ -35,7 +35,7 @@ const SOURCE_ID: &str = "opensky";
 const SOURCE_LABEL: &str = "Flight Tracking (ADS-B)";
 const FEED_URL: &str = "https://opensky-network.org/api/states/all";
 const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 /// Half-width of the bounding box queried around the station's own
 /// grid square, in degrees. ~220km/135mi north-south at mid latitudes

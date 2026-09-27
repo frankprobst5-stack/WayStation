@@ -45,7 +45,7 @@ use tauri::{AppHandle, Emitter, Manager};
 const SOURCE_ID: &str = "local-weather-station";
 const SOURCE_LABEL: &str = "Local Weather Station";
 const POLL_INTERVAL: Duration = Duration::from_secs(2 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 // Davis reports rain in raw tipping-bucket "counts" -- there is no way to
 // get inches without knowing the collector's own bucket size, which

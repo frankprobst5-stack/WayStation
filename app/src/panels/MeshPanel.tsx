@@ -580,7 +580,7 @@ function MeshPanel() {
         </div>
       </div>
 
-      <div className="mesh-footer">Meshtastic · Waystation</div>
+      <div className="mesh-footer">Meshtastic · WayStation</div>
     </div>
   );
 }

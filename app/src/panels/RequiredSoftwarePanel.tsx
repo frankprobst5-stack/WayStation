@@ -24,7 +24,7 @@ function RequiredSoftwarePanel() {
   return (
     <div className="panel-required-software">
       <p className="field-hint">
-        What's actually installed on this machine, for the programs Waystation talks to. Detection
+        What's actually installed on this machine, for the programs WayStation talks to. Detection
         only checks the filesystem — it never runs anything to find out, so "not found" can also
         mean it's installed somewhere unusual. Setup steps for each one are in the User Manual's
         Setup & Operation row.

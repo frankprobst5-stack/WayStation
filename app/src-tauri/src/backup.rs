@@ -1,6 +1,6 @@
 //! Full-database backup.
 //!
-//! Every real record in Waystation — QSO log, channel directory, resources,
+//! Every real record in WayStation — QSO log, channel directory, resources,
 //! net roster, station profile — lives in one SQLite file with no export
 //! path. A migration bug or a reinstall could lose all of it, with nothing
 //! to recover from. This is the safety net.

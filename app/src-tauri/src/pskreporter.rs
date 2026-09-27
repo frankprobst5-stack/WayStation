@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const SOURCE_ID: &str = "pskreporter";
 const POLL_INTERVAL: Duration = Duration::from_secs(20 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 /// Hand-rolled ADIF parser — no crate pulled in for a well-documented flat
 /// tag format, same call as the ICS parser in contest_calendar.rs. Each

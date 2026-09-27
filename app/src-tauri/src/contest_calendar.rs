@@ -20,7 +20,7 @@ use tauri::{AppHandle, Emitter, Manager};
 const SOURCE_ID: &str = "contest-calendar";
 const FEED_URL: &str = "https://www.contestcalendar.com/weeklycontcustom.php";
 const POLL_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60); // 8-day rolling list, changes rarely
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 fn unfold(body: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();

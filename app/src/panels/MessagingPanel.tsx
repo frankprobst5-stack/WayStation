@@ -176,7 +176,7 @@ function MessagingPanel() {
   return (
     <div className="panel-weather">
       <p className="sync-lede">
-        Unified communications center across every transport Waystation supports — without pretending they all
+        Unified communications center across every transport WayStation supports — without pretending they all
         behave like the same kind of chat.
       </p>
 

@@ -234,6 +234,13 @@ body {
   text-shadow: 0 0 8px rgba(255, 176, 0, 0.25);
 }
 
+.sidebar-brand-tag {
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;

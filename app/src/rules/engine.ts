@@ -65,7 +65,7 @@ async function handleConnectivityChange(snapshot: ConnectivitySnapshot) {
   if (prev === null || prev === snapshot.overall) return;
 
   if (await ensureNotificationPermission()) {
-    sendNotification({ title: "Waystation connectivity", body: CONNECTIVITY_LABEL[snapshot.overall] });
+    sendNotification({ title: "WayStation connectivity", body: CONNECTIVITY_LABEL[snapshot.overall] });
   }
 }
 

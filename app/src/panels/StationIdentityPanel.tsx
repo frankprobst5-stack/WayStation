@@ -166,7 +166,7 @@ function StationIdentityPanel() {
         <input type="checkbox" checked={rigEnabled} onChange={(e) => setRigEnabled(e.currentTarget.checked)} />
         Rig control enabled
         <span className="field-hint">
-          Off means Waystation never connects to rigctld and stops polling entirely — worth turning
+          Off means WayStation never connects to rigctld and stops polling entirely — worth turning
           off with no radio attached, or to leave the serial port to another program.
         </span>
       </label>
@@ -179,7 +179,7 @@ function StationIdentityPanel() {
           disabled={!rigEnabled}
         />
         <span className="field-hint">
-          Where rigctld is listening. Blank uses this computer. Waystation connects to a rigctld you
+          Where rigctld is listening. Blank uses this computer. WayStation connects to a rigctld you
           are already running — it never starts one, since only one program can hold the radio's
           serial port.
         </span>
@@ -192,7 +192,7 @@ function StationIdentityPanel() {
             under your callsign. Only expose it through a VPN or an SSH tunnel, never directly. On
             the radio's machine, bind rigctld to loopback so nothing else can reach it:
             <code className="rig-cmd">rigctld -m &lt;model&gt; -r &lt;device&gt; -T 127.0.0.1</code>
-            Turning this switch off stops <em>Waystation</em> connecting, but does not stop rigctld
+            Turning this switch off stops <em>WayStation</em> connecting, but does not stop rigctld
             listening — only its own flags or your firewall can do that.
           </span>
         )}
@@ -201,7 +201,7 @@ function StationIdentityPanel() {
         <input type="checkbox" checked={rotatorEnabled} onChange={(e) => setRotatorEnabled(e.currentTarget.checked)} />
         Rotator control enabled
         <span className="field-hint">
-          Off means Waystation never connects to rotctld and stops polling entirely — same reasoning
+          Off means WayStation never connects to rotctld and stops polling entirely — same reasoning
           as the rig switch above.
         </span>
       </label>

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Waystation",
+  "productName": "WayStation",
   "version": "0.1.1",
   "identifier": "com.waystation.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Waystation",
+        "title": "WayStation",
         "width": 800,
         "height": 600,
         "maximized": true

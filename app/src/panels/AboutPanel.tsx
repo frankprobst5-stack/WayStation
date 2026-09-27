@@ -5,8 +5,9 @@ const ISSUES_URL = "https://github.com/frankprobst5-stack/WayStation/issues/new"
 function AboutPanel() {
   return (
     <div className="panel-about">
-      <p>Copyright © 2026 Frank, KJ4ESQ and Waystation contributors.</p>
-      <p>Licensed GPLv3 — Waystation stays free forever.</p>
+      <p>Copyright © 2026 Frank, KJ4ESQ and WayStation contributors.</p>
+      <p>Licensed GPLv3 — WayStation stays free forever.</p>
+      <p className="field-hint">Part of the Citadel Ecosystem — self-reliance is freedom.</p>
       <button type="button" className="about-action-button" onClick={() => openUrl(ISSUES_URL)}>
         Report a bug (GitHub Issues)
       </button>

@@ -24,7 +24,7 @@
 //! "this radio can't do that." Reporting it as an error would make every
 //! rig look broken for the functions it simply lacks.
 //!
-//! **Client only — Waystation never spawns `rigctld`.** This is a
+//! **Client only — WayStation never spawns `rigctld`.** This is a
 //! deliberate departure from the Pat model, for a physical reason: a
 //! rig's serial port is exclusive. Many operators already run `rigctld`
 //! or FLRig to share one radio between WSJT-X, JS8Call, and a logger, and

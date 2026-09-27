@@ -24,7 +24,7 @@ const FEED_URL: &str = "https://www.hamqsl.com/solarxml.php";
 // aggregator, so no access-control questions apply here.
 const NOAA_SCALES_URL: &str = "https://services.swpc.noaa.gov/products/noaa-scales.json";
 const POLL_INTERVAL: Duration = Duration::from_secs(30 * 60);
-const USER_AGENT: &str = "Waystation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
+const USER_AGENT: &str = "WayStation/0.1 (https://github.com/frankprobst5-stack/WayStation)";
 
 fn text_of(doc: &roxmltree::Document, tag: &str) -> Option<String> {
     doc.descendants()

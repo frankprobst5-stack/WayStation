@@ -33,14 +33,14 @@ fn pat_dir() -> PathBuf {
 
 /// Kills any Pat process that's ours, even one we've lost track of.
 ///
-/// Found live: a Pat launched with Waystation's config survives a hard
-/// kill of the Waystation process itself (`kill -9`, which skips the
+/// Found live: a Pat launched with WayStation's config survives a hard
+/// kill of the WayStation process itself (`kill -9`, which skips the
 /// RunEvent::Exit handler that's supposed to clean this up), then sits
 /// there — undetected until Diagnostics happens to notice — blocking
 /// every future spawn attempt with a bind error. The same orphan
 /// survived from 01:18 through several dev-stack restarts undiscovered.
 ///
-/// Matches on the exact `--config` path Waystation always uses, never on
+/// Matches on the exact `--config` path WayStation always uses, never on
 /// the process being merely named "pat" — that's the difference between
 /// reclaiming our own leftover and killing a Pat the operator started
 /// themselves under a different config. If the path doesn't match
@@ -323,7 +323,7 @@ pub fn spawn_health_poller(app: AppHandle) {
             (
                 Status::Degraded,
                 Some(
-                    "A Pat that Waystation didn't start is using port 8778. It may be running \
+                    "A Pat that WayStation didn't start is using port 8778. It may be running \
                      under a different callsign. Press Restart Service to reclaim and replace it."
                         .to_string(),
                 ),

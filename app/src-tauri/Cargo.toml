@@ -1,8 +1,8 @@
 [package]
 name = "waystation"
 version = "0.1.1"
-description = "Waystation — offline-first amateur radio dashboard"
-authors = ["Frank, KJ4ESQ and Waystation contributors"]
+description = "WayStation — offline-first amateur radio dashboard"
+authors = ["Frank, KJ4ESQ and WayStation contributors"]
 license = "GPL-3.0-or-later"
 edition = "2021"
 

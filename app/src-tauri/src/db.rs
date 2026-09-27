@@ -42,12 +42,12 @@ pub struct StationProfile {
     /// Where to reach `rigctld` for Hamlib rig control — `host` or
     /// `host:port`, port defaulting to 4532. See `rig::rig_target`.
     pub rigctld_host: Option<String>,
-    /// Operator has manually taken Waystation off the internet. Persisted
+    /// Operator has manually taken WayStation off the internet. Persisted
     /// deliberately: an explicit instruction shouldn't be silently undone
     /// by a restart, which would put the app back on the network without
     /// the operator asking for it.
     pub manual_offline: bool,
-    /// Whether to talk to rigctld at all. Off means Waystation opens no
+    /// Whether to talk to rigctld at all. Off means WayStation opens no
     /// connection and does no polling — useful with no radio attached, in
     /// a go-kit where serial traffic costs battery, or when another
     /// program should have the rig to itself.
@@ -112,7 +112,7 @@ pub struct StationProfile {
     /// unchanged whenever the Station form saves.
     pub theme: String,
     /// Whether the Meshtastic poller should even try to connect. Same
-    /// reasoning as `rig_enabled`/`rotator_enabled`: off means Waystation
+    /// reasoning as `rig_enabled`/`rotator_enabled`: off means WayStation
     /// opens no connection and does no polling. Not a Station-form field --
     /// this is set through the ecosystem-wide module-convention "Modules"
     /// panel (see `ModulesPanel.tsx` and the Citadel Ecosystem
@@ -3579,7 +3579,7 @@ fn adif_field(name: &str, value: &str) -> String {
 pub fn export_qso_log_adif(db: State<Db>) -> String {
     let entries = get_qso_log(db);
     let mut out = String::new();
-    out.push_str("Exported from Waystation\n<PROGRAMID:10>Waystation<ADIF_VER:5>3.1.4<EOH>\n\n");
+    out.push_str("Exported from WayStation\n<PROGRAMID:10>WayStation<ADIF_VER:5>3.1.4<EOH>\n\n");
     for e in &entries {
         out.push_str(&adif_field("CALL", &e.call));
         out.push_str(&adif_field("QSO_DATE", &e.qso_date));
@@ -4206,14 +4206,14 @@ const MIGRATIONS: &[&str] = &[
     "#,
     // v19: rigctld address for Hamlib rig control. Same shape as
     // mesh_host -- NULL means the local default (127.0.0.1:4532).
-    // Waystation connects to an existing rigctld rather than starting
+    // WayStation connects to an existing rigctld rather than starting
     // one, because a radio's serial port is exclusive and many operators
     // already run rigctld or FLRig to share one rig between WSJT-X,
     // JS8Call and a logger.
     r#"
     ALTER TABLE station_profile ADD COLUMN rigctld_host TEXT;
     "#,
-    // v20: manual offline switch. Lets the operator take Waystation off
+    // v20: manual offline switch. Lets the operator take WayStation off
     // the internet without taking the whole machine off it -- useful in
     // the field (battery, metered or satellite links) and, just as
     // importantly, the only practical way to exercise this app's central
@@ -4222,7 +4222,7 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE station_profile ADD COLUMN manual_offline INTEGER NOT NULL DEFAULT 0;
     "#,
     // v21: rig control on/off. Defaults to on so existing setups keep
-    // working. Turning it off stops Waystation connecting to rigctld at
+    // working. Turning it off stops WayStation connecting to rigctld at
     // all -- it does NOT stop rigctld itself listening, which only the
     // operator's own rigctld flags or firewall can do.
     r#"

@@ -88,7 +88,7 @@ function DiagnosticsPanel() {
   // Plain text, so a bug report doesn't depend on a screenshot.
   async function copyReport() {
     const lines = [
-      `Waystation diagnostics — ${new Date().toISOString()}`,
+      `WayStation diagnostics — ${new Date().toISOString()}`,
       `Overall: ${snapshot!.overall}`,
       "",
       ...sorted.map((s) => {

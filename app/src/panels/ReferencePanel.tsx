@@ -109,7 +109,7 @@ function ReferencePanel() {
   return (
     <div className="panel-weather">
       <p className="sync-lede">
-        The knowledge layer behind Waystation — frequencies, repeaters, and field references that stay useful
+        The knowledge layer behind WayStation — frequencies, repeaters, and field references that stay useful
         offline.
       </p>
 

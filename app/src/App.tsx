@@ -68,7 +68,8 @@ function App() {
       <FirstRunWizard onFinished={() => {}} />
       <nav className="sidebar">
         <div className="sidebar-brand">
-          <h1>Waystation</h1>
+          <h1>WayStation</h1>
+          <div className="sidebar-brand-tag">Citadel Ecosystem</div>
         </div>
 
         <div className="sidebar-nav">

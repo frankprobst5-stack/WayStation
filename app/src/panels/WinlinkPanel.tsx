@@ -111,7 +111,7 @@ function WinlinkPanel() {
           Deliberately does NOT claim account setup happens there: Pat's
           web UI is mail only. The password lives in Pat's config file,
           which is edited from a terminal — and the config path matters,
-          because Pat's own default is not the file Waystation runs it
+          because Pat's own default is not the file WayStation runs it
           with, so `pat configure` without --config silently edits the
           wrong file. */}
       {status.api_reachable && (
@@ -135,9 +135,9 @@ function WinlinkPanel() {
           fine. */}
       {status.foreign_process && (
         <div className="winlink-warning">
-          Pat is answering on port 8778, but Waystation didn't start it — most likely a leftover
+          Pat is answering on port 8778, but WayStation didn't start it — most likely a leftover
           from an earlier session. It may be using a different callsign than the one set in the
-          Station panel. If it's a leftover from Waystation itself, pressing Restart Service will
+          Station panel. If it's a leftover from WayStation itself, pressing Restart Service will
           find and replace it automatically. If it's a Pat you started yourself under a different
           setup, quit that one first.
         </div>

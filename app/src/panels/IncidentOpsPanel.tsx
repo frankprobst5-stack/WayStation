@@ -10,7 +10,7 @@ import ReadinessPanel from "./ReadinessPanel";
 
 // Consolidates six panels that used to each show up as their own separate
 // stacked tile under the "incident-ops" category into one tabbed page,
-// matching the Incident Ops mockup ("the heart of Waystation"). Every tab
+// matching the Incident Ops mockup ("the heart of WayStation"). Every tab
 // embeds the real existing panel component unchanged.
 //
 // Two of the mockup's tabs -- Timeline and SITREP -- already exist for
@@ -134,7 +134,7 @@ function IncidentOpsPanel() {
   return (
     <div className="panel-weather">
       <p className="sync-lede">
-        The heart of Waystation's incident coordination — one declared incident is what messages, map markers,
+        The heart of WayStation's incident coordination — one declared incident is what messages, map markers,
         personnel, and resource requests all get tagged against.
       </p>
 
