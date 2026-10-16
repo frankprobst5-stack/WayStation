@@ -49,26 +49,39 @@ function StationIdentityPanel() {
   const [citadelKiwixHost, setCitadelKiwixHost] = useState("");
   const [direwolfAudioDevice, setDirewolfAudioDevice] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<StationProfile>("get_station_profile").then((p) => {
-      setProfile(p);
-      setCallsign(p.callsign ?? "");
-      setGridSquare(p.grid_square ?? "");
-      setOperatorName(p.operator_name ?? "");
-      setRepeaterbookToken(p.repeaterbook_token ?? "");
-      setMeshHost(p.mesh_host ?? "");
-      setRigctldHost(p.rigctld_host ?? "");
-      setRigEnabled(p.rig_enabled);
-      setRotctldHost(p.rotctld_host ?? "");
-      setRotatorEnabled(p.rotator_enabled);
-      setCitadelMapHost(p.citadel_map_host ?? "");
-      setCitadelVaultToken(p.citadel_vault_token ?? "");
-      setLocalWeatherBrand(p.local_weather_brand ?? "");
-      setLocalWeatherHost(p.local_weather_host ?? "");
-      setCitadelKiwixHost(p.citadel_kiwix_host ?? "");
-      setDirewolfAudioDevice(p.direwolf_audio_device ?? "");
-    });
+    // Real bug found live 2026-10-09: this .then() had no .catch() at
+    // all, so a failed fetch left `profile` null forever -- and
+    // `!profile` below is this panel's own loading gate. Since this is
+    // where a station's callsign/grid square get configured in the
+    // first place, hanging here could block a new user from ever
+    // reaching initial setup, not just this one panel.
+    invoke<StationProfile>("get_station_profile")
+      .then((p) => {
+        setProfile(p);
+        setCallsign(p.callsign ?? "");
+        setGridSquare(p.grid_square ?? "");
+        setOperatorName(p.operator_name ?? "");
+        setRepeaterbookToken(p.repeaterbook_token ?? "");
+        setMeshHost(p.mesh_host ?? "");
+        setRigctldHost(p.rigctld_host ?? "");
+        setRigEnabled(p.rig_enabled);
+        setRotctldHost(p.rotctld_host ?? "");
+        setRotatorEnabled(p.rotator_enabled);
+        setCitadelMapHost(p.citadel_map_host ?? "");
+        setCitadelVaultToken(p.citadel_vault_token ?? "");
+        setLocalWeatherBrand(p.local_weather_brand ?? "");
+        setLocalWeatherHost(p.local_weather_host ?? "");
+        setCitadelKiwixHost(p.citadel_kiwix_host ?? "");
+        setDirewolfAudioDevice(p.direwolf_audio_device ?? "");
+      })
+      .catch((err) => {
+        console.error("get_station_profile failed:", err);
+        setLoadError(String(err));
+      });
   }, []);
 
   const gridValid = gridSquare === "" || GRID_SQUARE_PATTERN.test(gridSquare);
@@ -78,26 +91,42 @@ function StationIdentityPanel() {
     e.preventDefault();
     if (!gridValid) return;
     setSaveState("saving");
-    const updated = await invoke<StationProfile>("save_station_profile", {
-      callsign: callsign || null,
-      gridSquare: gridSquare || null,
-      operatorName: operatorName || null,
-      repeaterbookToken: repeaterbookToken || null,
-      meshHost: meshHost.trim() || null,
-      rigctldHost: rigctldHost.trim() || null,
-      rigEnabled,
-      rotctldHost: rotctldHost.trim() || null,
-      rotatorEnabled,
-      citadelMapHost: citadelMapHost.trim() || null,
-      citadelVaultToken: citadelVaultToken.trim() || null,
-      localWeatherBrand: localWeatherBrand || null,
-      localWeatherHost: localWeatherHost.trim() || null,
-      citadelKiwixHost: citadelKiwixHost.trim() || null,
-      direwolfAudioDevice: direwolfAudioDevice.trim() || null,
-    });
-    setProfile(updated);
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 1500);
+    // Real bug found live 2026-10-09: no catch meant a failed save left
+    // `saveState` stuck on "saving" forever -- the Save button is
+    // disabled while saving (see the render below), so a failure here
+    // permanently locked the user out of ever saving their station
+    // identity again without a full app restart.
+    try {
+      const updated = await invoke<StationProfile>("save_station_profile", {
+        callsign: callsign || null,
+        gridSquare: gridSquare || null,
+        operatorName: operatorName || null,
+        repeaterbookToken: repeaterbookToken || null,
+        meshHost: meshHost.trim() || null,
+        rigctldHost: rigctldHost.trim() || null,
+        rigEnabled,
+        rotctldHost: rotctldHost.trim() || null,
+        rotatorEnabled,
+        citadelMapHost: citadelMapHost.trim() || null,
+        citadelVaultToken: citadelVaultToken.trim() || null,
+        localWeatherBrand: localWeatherBrand || null,
+        localWeatherHost: localWeatherHost.trim() || null,
+        citadelKiwixHost: citadelKiwixHost.trim() || null,
+        direwolfAudioDevice: direwolfAudioDevice.trim() || null,
+      });
+      setProfile(updated);
+      setSaveError(null);
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 1500);
+    } catch (err) {
+      console.error("save_station_profile failed:", err);
+      setSaveError(String(err));
+      setSaveState("idle");
+    }
+  }
+
+  if (loadError) {
+    return <div className="panel-station-identity panel-alerts-empty">Could not load station identity: {loadError}</div>;
   }
 
   if (!profile) {
@@ -301,6 +330,7 @@ function StationIdentityPanel() {
           Packet panel to start/stop Direwolf itself.
         </span>
       </label>
+      {saveError && <div className="panel-alerts-empty">Save failed: {saveError}</div>}
       <button type="submit" disabled={!gridValid || saveState === "saving"}>
         {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving..." : "Save"}
       </button>

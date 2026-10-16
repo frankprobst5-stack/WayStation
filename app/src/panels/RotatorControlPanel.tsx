@@ -20,7 +20,21 @@ function RotatorControlPanel() {
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setStatus(await invoke<RotatorStatus>("get_rotator_status"));
+    // Real bug found live 2026-10-09 (same file-wide sweep as
+    // RigControlPanel): no catch meant a failed invoke left `status`
+    // null forever, and `!status` below is this panel's own loading
+    // gate. Falling back to enabled:false lands on the existing honest
+    // "not enabled" state instead of hanging forever.
+    try {
+      setStatus(await invoke<RotatorStatus>("get_rotator_status"));
+    } catch (err) {
+      console.error("get_rotator_status failed:", err);
+      setError(String(err));
+      setStatus({
+        reachable: false, enabled: false, remote_target: false, target: "",
+        azimuth_deg: null, elevation_deg: null, detail: null,
+      });
+    }
   }
 
   useEffect(() => {

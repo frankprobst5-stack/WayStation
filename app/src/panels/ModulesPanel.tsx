@@ -90,14 +90,23 @@ const MODULE_CATALOG: ModuleManifest[] = [
 
 function ModuleRow({ manifest, enabled, onToggle }: { manifest: ModuleManifest; enabled: boolean; onToggle: (next: boolean) => void }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function flip() {
     if (busy) return;
     setBusy(true);
     const next = !enabled;
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed toggle left the switch stuck visually unchanged (busy
+    // correctly reset, onToggle never called) with no explanation why
+    // clicking it appeared to do nothing.
     try {
       await invoke(manifest.command, { enabled: next });
+      setError(null);
       onToggle(next);
+    } catch (err) {
+      console.error(`${manifest.command} failed:`, err);
+      setError(String(err));
     } finally {
       setBusy(false);
     }
@@ -112,6 +121,7 @@ function ModuleRow({ manifest, enabled, onToggle }: { manifest: ModuleManifest; 
           {manifest.requiresHardware && <span className="resource-chip module-row-badge">hardware</span>}
         </div>
         <div className="field-hint">{manifest.description}</div>
+        {error && <div className="panel-alerts-empty">{error}</div>}
       </div>
       <button
         type="button"
@@ -130,9 +140,23 @@ function ModuleRow({ manifest, enabled, onToggle }: { manifest: ModuleManifest; 
 function ModulesPanel() {
   const [profile, setProfile] = useState<StationProfileModuleFields | null>(null);
 
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   useEffect(() => {
-    invoke<StationProfileModuleFields>("get_station_profile").then(setProfile);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left `profile` null forever, and `!profile`
+    // below is this panel's own loading gate.
+    invoke<StationProfileModuleFields>("get_station_profile")
+      .then(setProfile)
+      .catch((err) => {
+        console.error("get_station_profile failed:", err);
+        setFetchError(String(err));
+      });
   }, []);
+
+  if (fetchError) {
+    return <div className="panel-alerts panel-alerts-empty">Could not load module settings: {fetchError}</div>;
+  }
 
   if (!profile) {
     return <div className="panel-alerts">Loading...</div>;

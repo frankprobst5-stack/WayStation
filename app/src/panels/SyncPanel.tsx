@@ -66,17 +66,34 @@ function SyncPanel() {
   const [discovered, setDiscovered] = useState<DiscoveredPeer[]>([]);
   const [netSyncState, setNetSyncState] = useState<NetSyncState>({ status: "idle" });
   const [autoSyncHistory, setAutoSyncHistory] = useState<AutoSyncRecord[]>([]);
+  const [peerError, setPeerError] = useState<string | null>(null);
 
+  // Real bug found live 2026-10-09 (same file-wide sweep): none of these
+  // three caught a failed invoke -- all three state vars already init to
+  // [], so no Loading-gate hang, but a failure still threw unhandled
+  // with zero console signal.
   async function refreshPeers() {
-    setPeers(await invoke<TrustedPeer[]>("get_trusted_peers"));
+    try {
+      setPeers(await invoke<TrustedPeer[]>("get_trusted_peers"));
+    } catch (err) {
+      console.error("get_trusted_peers failed:", err);
+    }
   }
 
   async function refreshDiscovered() {
-    setDiscovered(await invoke<DiscoveredPeer[]>("get_discovered_peers"));
+    try {
+      setDiscovered(await invoke<DiscoveredPeer[]>("get_discovered_peers"));
+    } catch (err) {
+      console.error("get_discovered_peers failed:", err);
+    }
   }
 
   async function refreshAutoSyncHistory() {
-    setAutoSyncHistory(await invoke<AutoSyncRecord[]>("get_auto_sync_history"));
+    try {
+      setAutoSyncHistory(await invoke<AutoSyncRecord[]>("get_auto_sync_history"));
+    } catch (err) {
+      console.error("get_auto_sync_history failed:", err);
+    }
   }
 
   useEffect(() => {
@@ -90,7 +107,11 @@ function SyncPanel() {
   }, []);
 
   async function revealMySecret() {
-    setMySecret(await invoke<string>("get_or_create_signing_secret"));
+    try {
+      setMySecret(await invoke<string>("get_or_create_signing_secret"));
+    } catch (err) {
+      console.error("get_or_create_signing_secret failed:", err);
+    }
   }
 
   async function copySecret() {
@@ -104,25 +125,45 @@ function SyncPanel() {
     e.preventDefault();
     if (!peerCallsign.trim() || !peerSecret.trim()) return;
     setAddingPeer(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed add left the form filled with no explanation why nothing
+    // happened -- trust/peer setup is exactly the kind of thing a
+    // silent failure here could leave genuinely broken unnoticed.
     try {
       await invoke("add_trusted_peer", { callsign: peerCallsign.trim(), sharedSecret: peerSecret.trim(), notes: peerNotes.trim() || null });
+      setPeerError(null);
       setPeerCallsign("");
       setPeerSecret("");
       setPeerNotes("");
       await refreshPeers();
+    } catch (err) {
+      console.error("add_trusted_peer failed:", err);
+      setPeerError(String(err));
     } finally {
       setAddingPeer(false);
     }
   }
 
   async function removePeer(id: number) {
-    await invoke("delete_trusted_peer", { id });
-    await refreshPeers();
+    try {
+      await invoke("delete_trusted_peer", { id });
+      setPeerError(null);
+      await refreshPeers();
+    } catch (err) {
+      console.error("delete_trusted_peer failed:", err);
+      setPeerError(String(err));
+    }
   }
 
   async function toggleAutoSync(peer: TrustedPeer) {
-    await invoke("set_trusted_peer_auto_sync", { id: peer.id, autoSync: !peer.auto_sync });
-    await refreshPeers();
+    try {
+      await invoke("set_trusted_peer_auto_sync", { id: peer.id, autoSync: !peer.auto_sync });
+      setPeerError(null);
+      await refreshPeers();
+    } catch (err) {
+      console.error("set_trusted_peer_auto_sync failed:", err);
+      setPeerError(String(err));
+    }
   }
 
   function isTrusted(callsign: string | null): boolean {
@@ -283,6 +324,7 @@ function SyncPanel() {
             {addingPeer ? "Adding…" : "Add Trusted Peer"}
           </button>
         </form>
+        {peerError && <div className="panel-alerts-empty">{peerError}</div>}
 
         <h4>Automated Background Sync</h4>
         <p className="field-hint">

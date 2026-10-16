@@ -52,18 +52,30 @@ function SatellitePanel() {
   const [loading, setLoading] = useState(false);
   const [freqMhz, setFreqMhz] = useState("146.000");
   const [groundTrack, setGroundTrack] = useState<GroundTrackPoint[] | null>(null);
+  const [listFetchError, setListFetchError] = useState<string | null>(null);
   const trackCanvasRef = useRef<HTMLCanvasElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
 
   async function refreshList() {
-    const [tleList, profile] = await Promise.all([
-      invoke<SatelliteTle[]>("get_satellite_tles"),
-      invoke<{ grid_square: string | null }>("get_station_profile"),
-    ]);
-    setTles(tleList);
-    setHasGridSquare(!!profile.grid_square);
-    if (selectedId === null && tleList.length > 0) {
-      setSelectedId(tleList[0].norad_id);
+    // Real bug found live 2026-10-09 (same file-wide sweep, same
+    // pattern as AlertsPanel/DxClusterPanel/PskReporterPanel): no catch
+    // meant a failed invoke left state null forever (the loading gate
+    // below), and a naive hasGridSquare:false fallback would show a
+    // misleading "set your grid square" message, hence listFetchError.
+    try {
+      const [tleList, profile] = await Promise.all([
+        invoke<SatelliteTle[]>("get_satellite_tles"),
+        invoke<{ grid_square: string | null }>("get_station_profile"),
+      ]);
+      setListFetchError(null);
+      setTles(tleList);
+      setHasGridSquare(!!profile.grid_square);
+      if (selectedId === null && tleList.length > 0) {
+        setSelectedId(tleList[0].norad_id);
+      }
+    } catch (err) {
+      console.error("refresh satellite tles/station profile failed:", err);
+      setListFetchError(String(err));
     }
   }
 
@@ -112,9 +124,16 @@ function SatellitePanel() {
     if (selectedId === null) return;
     let cancelled = false;
     function fetchTrack() {
-      invoke<GroundTrackPoint[]>("get_satellite_ground_track", { noradId: selectedId }).then((t) => {
-        if (!cancelled) setGroundTrack(t);
-      });
+      invoke<GroundTrackPoint[]>("get_satellite_ground_track", { noradId: selectedId })
+        .then((t) => {
+          if (!cancelled) setGroundTrack(t);
+        })
+        .catch((err) => {
+          // Real bug found live 2026-10-09: no catch meant a failed
+          // fetch just silently left the ground track stale with no
+          // signal.
+          if (!cancelled) console.error("get_satellite_ground_track failed:", err);
+        });
     }
     fetchTrack();
     const interval = setInterval(fetchTrack, 5 * 60 * 1000);
@@ -151,6 +170,10 @@ function SatellitePanel() {
       drawPin(ctx, width, height, status.subpoint_lon_deg, status.subpoint_lat_deg, "#008dff");
     }
   }, [groundTrack, status]);
+
+  if (listFetchError) {
+    return <div className="panel-alerts panel-alerts-empty">Could not load satellite data: {listFetchError}</div>;
+  }
 
   if (tles === null || hasGridSquare === null) {
     return <div className="panel-alerts">Loading...</div>;

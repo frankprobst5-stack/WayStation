@@ -33,7 +33,15 @@ function PotaPanel() {
   const [spots, setSpots] = useState<PotaSpot[] | null>(null);
 
   async function refresh() {
-    setSpots(await invoke<PotaSpot[]>("get_pota_spots"));
+    // Real bug found live 2026-10-09 (same pattern across this file
+    // sweep): no catch meant a failed invoke left `spots` null forever,
+    // and `spots === null` is this panel's own loading gate.
+    try {
+      setSpots(await invoke<PotaSpot[]>("get_pota_spots"));
+    } catch (err) {
+      console.error("get_pota_spots failed:", err);
+      setSpots([]);
+    }
   }
 
   useEffect(() => {

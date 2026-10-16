@@ -66,9 +66,14 @@ function GridSquareField({
 
   async function save() {
     setSaving(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed save left the "Set" button stuck on "…" with no
+    // explanation (saving did correctly reset, but silently).
     try {
       await invoke("set_person_location", { personId, gridSquare: draft.trim() || null });
       onSaved();
+    } catch (err) {
+      console.error("set_person_location failed:", err);
     } finally {
       setSaving(false);
     }
@@ -99,11 +104,21 @@ function PersonnelPanel() {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // Real bug found live 2026-10-09 (same file-wide sweep as
+  // PersonLocationEditor above): none of these four caught a failed
+  // invoke -- refresh() left the roster stale with no signal, and the
+  // three write actions silently did nothing on failure.
   async function refresh() {
-    const [people, allIncidents] = await Promise.all([invoke<Person[]>("get_personnel"), invoke<Incident[]>("get_incidents")]);
-    setPersonnel(people);
-    setIncidents(allIncidents.filter((i) => i.status === "active"));
+    try {
+      const [people, allIncidents] = await Promise.all([invoke<Person[]>("get_personnel"), invoke<Incident[]>("get_incidents")]);
+      setPersonnel(people);
+      setIncidents(allIncidents.filter((i) => i.status === "active"));
+    } catch (err) {
+      console.error("refresh personnel/incidents failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -116,23 +131,39 @@ function PersonnelPanel() {
     setCreating(true);
     try {
       await invoke("create_person", { callsign: callsign.trim() || null, name: name.trim(), role: role.trim() || null });
+      setError(null);
       setCallsign("");
       setName("");
       setRole("");
       await refresh();
+    } catch (err) {
+      console.error("create_person failed:", err);
+      setError(String(err));
     } finally {
       setCreating(false);
     }
   }
 
   async function changeStatus(personId: number, status: string) {
-    await invoke("set_person_status", { personId, status });
-    await refresh();
+    try {
+      await invoke("set_person_status", { personId, status });
+      setError(null);
+      await refresh();
+    } catch (err) {
+      console.error("set_person_status failed:", err);
+      setError(String(err));
+    }
   }
 
   async function changeIncident(personId: number, incidentUuid: string) {
-    await invoke("assign_person_to_incident", { personId, incidentId: incidentUuid || null });
-    await refresh();
+    try {
+      await invoke("assign_person_to_incident", { personId, incidentId: incidentUuid || null });
+      setError(null);
+      await refresh();
+    } catch (err) {
+      console.error("assign_person_to_incident failed:", err);
+      setError(String(err));
+    }
   }
 
   function incidentName(uuid: string | null): string {
@@ -155,6 +186,7 @@ function PersonnelPanel() {
           {creating ? "Adding…" : "Add Person"}
         </button>
       </form>
+      {error && <div className="panel-alerts-empty">{error}</div>}
 
       <div className="personnel-list">
         {personnel.length === 0 && <div className="personnel-empty">No one on the roster yet.</div>}

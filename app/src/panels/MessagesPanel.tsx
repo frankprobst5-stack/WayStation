@@ -71,19 +71,27 @@ function MessagesPanel() {
   const [body, setBody] = useState("");
   const [exportText, setExportText] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setMessages(await invoke<Message[]>("get_messages"));
+    try {
+      setMessages(await invoke<Message[]>("get_messages"));
+    } catch (err) {
+      console.error("get_messages failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
     refresh();
-    invoke<{ callsign: string | null }>("get_station_profile").then((p) => {
-      if (p.callsign) {
-        setFromStation(p.callsign);
-        setOwnCallsign(p.callsign);
-      }
-    });
+    invoke<{ callsign: string | null }>("get_station_profile")
+      .then((p) => {
+        if (p.callsign) {
+          setFromStation(p.callsign);
+          setOwnCallsign(p.callsign);
+        }
+      })
+      .catch((err) => console.error("get_station_profile failed:", err));
   }, []);
 
   // "Outgoing" vs "incoming" isn't stored -- messages only have from/to
@@ -100,29 +108,49 @@ function MessagesPanel() {
   async function send(e: React.FormEvent) {
     e.preventDefault();
     if (!body.trim()) return;
-    const created = await invoke<Message>("create_message", {
-      precedence,
-      toStation: toStation || null,
-      toName: toName || null,
-      fromStation: fromStation || null,
-      fromName: null,
-      subject: subject || null,
-      messageText: body,
-    });
-    setToStation("");
-    setToName("");
-    setSubject("");
-    setBody("");
-    // Try to actually send it right away -- if nothing can reach the
-    // recipient yet it just stays queued, redispatch_queued picks it up
-    // automatically the next time a transport reconnects.
-    await invoke("dispatch_message", { messageId: created.id });
-    refresh();
+    // Real bug found live 2026-10-09: no catch anywhere in this
+    // function. A failed create_message left the form filled with no
+    // explanation; worse, if create_message succeeded but the following
+    // dispatch_message failed, the form already cleared (looked like it
+    // sent) while the new message never even appeared in the list below
+    // (refresh() never ran) -- a real message silently created but
+    // invisible, with the sender believing it went out.
+    try {
+      const created = await invoke<Message>("create_message", {
+        precedence,
+        toStation: toStation || null,
+        toName: toName || null,
+        fromStation: fromStation || null,
+        fromName: null,
+        subject: subject || null,
+        messageText: body,
+      });
+      setError(null);
+      setToStation("");
+      setToName("");
+      setSubject("");
+      setBody("");
+      // Try to actually send it right away -- if nothing can reach the
+      // recipient yet it just stays queued, redispatch_queued picks it up
+      // automatically the next time a transport reconnects.
+      await invoke("dispatch_message", { messageId: created.id });
+      refresh();
+    } catch (err) {
+      console.error("send message failed:", err);
+      setError(String(err));
+      refresh(); // in case create_message succeeded but dispatch didn't -- show the real queued state
+    }
   }
 
   async function redispatch(id: number) {
-    await invoke("dispatch_message", { messageId: id });
-    refresh();
+    try {
+      await invoke("dispatch_message", { messageId: id });
+      setError(null);
+      refresh();
+    } catch (err) {
+      console.error("dispatch_message failed:", err);
+      setError(String(err));
+    }
   }
 
   function exportLog() {
@@ -158,6 +186,7 @@ function MessagesPanel() {
         <input value={toName} onChange={(e) => setToName(e.currentTarget.value)} placeholder="To name (optional)" />
         <input value={subject} onChange={(e) => setSubject(e.currentTarget.value)} placeholder="Subject" />
         <textarea value={body} onChange={(e) => setBody(e.currentTarget.value)} placeholder="Message text" rows={3} />
+        {error && <div className="panel-alerts-empty">{error}</div>}
         <button type="submit">Log Message (ICS-213)</button>
       </form>
 

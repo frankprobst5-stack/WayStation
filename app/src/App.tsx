@@ -53,7 +53,14 @@ function App() {
 
   useEffect(() => {
     startRulesEngine();
-    invoke<{ theme: string }>("get_station_profile").then((p) => applyTheme(p.theme ?? "dark"));
+    // Real bug found live 2026-10-09 (same file-wide sweep across this
+    // whole codebase): no catch -- low severity (the app just keeps
+    // whatever theme is already applied instead of the saved
+    // preference), but still worth logging rather than an unhandled
+    // rejection at the app's own top level.
+    invoke<{ theme: string }>("get_station_profile")
+      .then((p) => applyTheme(p.theme ?? "dark"))
+      .catch((err) => console.error("get_station_profile failed:", err));
   }, []);
 
   const visible = tacticalMode ? panels.filter((p) => !p.hobbyist) : panels;

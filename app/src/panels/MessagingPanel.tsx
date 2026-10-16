@@ -47,11 +47,16 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
   const [roster, setRoster] = useState<RosterEntry[] | null>(null);
 
   useEffect(() => {
-    invoke<MeshStatus>("get_mesh_status").then(setMesh);
-    invoke<WinlinkStatus>("get_winlink_status").then(setWinlink);
-    invoke<Js8CallStatus>("get_js8call_status").then(setJs8);
-    invoke<DirewolfStatus>("get_direwolf_status").then(setPacket);
-    invoke<RosterEntry[]>("get_net_roster").then(setRoster);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch on
+    // any of these -- each status tile below renders "Loading..." as
+    // long as its own state stays null, so a failure here leaves that
+    // tile stuck showing "Loading..." forever instead of an honest
+    // disconnected/unknown state.
+    invoke<MeshStatus>("get_mesh_status").then(setMesh).catch((err) => console.error("get_mesh_status failed:", err));
+    invoke<WinlinkStatus>("get_winlink_status").then(setWinlink).catch((err) => console.error("get_winlink_status failed:", err));
+    invoke<Js8CallStatus>("get_js8call_status").then(setJs8).catch((err) => console.error("get_js8call_status failed:", err));
+    invoke<DirewolfStatus>("get_direwolf_status").then(setPacket).catch((err) => console.error("get_direwolf_status failed:", err));
+    invoke<RosterEntry[]>("get_net_roster").then(setRoster).catch((err) => console.error("get_net_roster failed:", err));
   }, []);
 
   const checkedIn = roster?.filter((r) => r.status === "checked_in").length ?? 0;
@@ -161,7 +166,12 @@ function MessagingPanel() {
   });
 
   useEffect(() => {
-    invoke<StationProfileTransportFields>("get_station_profile").then(setEnabled);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch --
+    // fails open to the existing all-true defaults on failure, harmless,
+    // but still worth logging rather than an unhandled rejection.
+    invoke<StationProfileTransportFields>("get_station_profile")
+      .then(setEnabled)
+      .catch((err) => console.error("get_station_profile failed:", err));
   }, []);
 
   const visibleTabs = TABS.filter((t) => {

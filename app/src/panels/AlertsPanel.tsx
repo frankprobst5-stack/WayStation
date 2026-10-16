@@ -34,14 +34,27 @@ function expiryLabel(expires: string | null): string {
 function AlertsPanel() {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [hasGridSquare, setHasGridSquare] = useState<boolean | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   async function refresh() {
-    const [alertList, profile] = await Promise.all([
-      invoke<Alert[]>("get_alerts"),
-      invoke<{ grid_square: string | null }>("get_station_profile"),
-    ]);
-    setAlerts(alertList);
-    setHasGridSquare(!!profile.grid_square);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left `alerts`/`hasGridSquare` null forever,
+    // and that's this panel's own loading gate below. A dedicated
+    // fetchError rather than hasGridSquare:false -- that would have
+    // shown a misleading "set your grid square" message even when the
+    // grid square genuinely is set and the fetch just failed.
+    try {
+      const [alertList, profile] = await Promise.all([
+        invoke<Alert[]>("get_alerts"),
+        invoke<{ grid_square: string | null }>("get_station_profile"),
+      ]);
+      setFetchError(null);
+      setAlerts(alertList);
+      setHasGridSquare(!!profile.grid_square);
+    } catch (err) {
+      console.error("refresh alerts/station profile failed:", err);
+      setFetchError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -52,6 +65,10 @@ function AlertsPanel() {
     });
     return () => unlisten?.();
   }, []);
+
+  if (fetchError) {
+    return <div className="panel-alerts panel-alerts-empty">Could not check alerts: {fetchError}</div>;
+  }
 
   if (alerts === null || hasGridSquare === null) {
     return <div className="panel-alerts">Loading...</div>;

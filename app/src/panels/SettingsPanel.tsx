@@ -41,7 +41,14 @@ interface TrustedPeer { id: number }
 function useInvoke<T>(command: string) {
   const [data, setData] = useState<T | null>(null);
   useEffect(() => {
-    invoke<T>(command).then(setData);
+    // Real bug found live 2026-10-09 (same hook pattern/fix as
+    // ActivityPanel's useCount and IncidentOpsPanel's useList, same
+    // file-wide sweep): no catch meant a failed invoke left `data` null
+    // forever, which several SummaryCard tiles below render as a
+    // permanent "Loading..." on failure.
+    invoke<T>(command)
+      .then(setData)
+      .catch((err) => console.error(`${command} failed:`, err));
   }, [command]);
   return data;
 }

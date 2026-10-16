@@ -140,16 +140,26 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
   const [scanner, setScanner] = useState<ScannerStatus | null>(null);
 
   useEffect(() => {
-    invoke<StationProfile>("get_station_profile").then(setProfile);
-    invoke<Channel[]>("get_channels").then(setChannels);
+    // Real bug found live 2026-10-09 (same file-wide sweep across this
+    // whole codebase): 13 of these 14 invoke() calls had no .catch() at
+    // all -- only refreshScanner did. The repeating ones (rig/rotator
+    // every 3s, activity every 15s, incident every 30s) self-heal on
+    // their next tick so aren't permanently stuck the way a one-shot
+    // fetch would be, but every failure was an unlogged, silent
+    // uncaught rejection either way -- real signal lost for debugging a
+    // live station, not just a cosmetic gap.
+    invoke<StationProfile>("get_station_profile").then(setProfile).catch((err) => console.error("get_station_profile failed:", err));
+    invoke<Channel[]>("get_channels").then(setChannels).catch((err) => console.error("get_channels failed:", err));
 
     const refreshIncident = () => {
-      invoke<IncidentInfo>("get_incident_info").then(setIncidentInfo);
-      invoke<TrafficCounts>("get_traffic_counts").then(setTraffic);
+      invoke<IncidentInfo>("get_incident_info").then(setIncidentInfo).catch((err) => console.error("get_incident_info failed:", err));
+      invoke<TrafficCounts>("get_traffic_counts").then(setTraffic).catch((err) => console.error("get_traffic_counts failed:", err));
     };
-    const refreshActivity = () => invoke<ActivityEntry[]>("get_recent_activity").then(setActivity);
-    const refreshRig = () => invoke<RigStatus>("get_rig_status").then(setRig);
-    const refreshRotator = () => invoke<RotatorStatus>("get_rotator_status").then(setRotator);
+    const refreshActivity = () =>
+      invoke<ActivityEntry[]>("get_recent_activity").then(setActivity).catch((err) => console.error("get_recent_activity failed:", err));
+    const refreshRig = () => invoke<RigStatus>("get_rig_status").then(setRig).catch((err) => console.error("get_rig_status failed:", err));
+    const refreshRotator = () =>
+      invoke<RotatorStatus>("get_rotator_status").then(setRotator).catch((err) => console.error("get_rotator_status failed:", err));
     const refreshScanner = () =>
       invoke<ScannerStatus>("get_citadel_scanner_status")
         .then(setScanner)
@@ -160,9 +170,11 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
     refreshRig();
     refreshRotator();
     refreshScanner();
-    invoke<SystemHealthSnapshot | null>("get_system_health").then(setHealth);
-    invoke<SpaceWeather>("get_space_weather").then(setSpaceWeather);
-    invoke<LocalWeatherObservation>("get_local_weather_observation").then(setLocalWeather);
+    invoke<SystemHealthSnapshot | null>("get_system_health").then(setHealth).catch((err) => console.error("get_system_health failed:", err));
+    invoke<SpaceWeather>("get_space_weather").then(setSpaceWeather).catch((err) => console.error("get_space_weather failed:", err));
+    invoke<LocalWeatherObservation>("get_local_weather_observation")
+      .then(setLocalWeather)
+      .catch((err) => console.error("get_local_weather_observation failed:", err));
 
     const incidentTimer = setInterval(refreshIncident, 30_000);
     const activityTimer = setInterval(refreshActivity, 15_000);
@@ -173,11 +185,17 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
     let unlistenHealth: (() => void) | undefined;
     let unlistenSpaceWeather: (() => void) | undefined;
     let unlistenLocalWeather: (() => void) | undefined;
-    listen<void>("system-health-changed", () => invoke<SystemHealthSnapshot | null>("get_system_health").then(setHealth)).then((fn) => (unlistenHealth = fn));
-    listen<void>("space-weather-changed", () => invoke<SpaceWeather>("get_space_weather").then(setSpaceWeather)).then((fn) => (unlistenSpaceWeather = fn));
-    listen<void>("local-weather-changed", () => invoke<LocalWeatherObservation>("get_local_weather_observation").then(setLocalWeather)).then(
-      (fn) => (unlistenLocalWeather = fn),
-    );
+    listen<void>("system-health-changed", () =>
+      invoke<SystemHealthSnapshot | null>("get_system_health").then(setHealth).catch((err) => console.error("get_system_health failed:", err)),
+    ).then((fn) => (unlistenHealth = fn));
+    listen<void>("space-weather-changed", () =>
+      invoke<SpaceWeather>("get_space_weather").then(setSpaceWeather).catch((err) => console.error("get_space_weather failed:", err)),
+    ).then((fn) => (unlistenSpaceWeather = fn));
+    listen<void>("local-weather-changed", () =>
+      invoke<LocalWeatherObservation>("get_local_weather_observation")
+        .then(setLocalWeather)
+        .catch((err) => console.error("get_local_weather_observation failed:", err)),
+    ).then((fn) => (unlistenLocalWeather = fn));
 
     return () => {
       clearInterval(incidentTimer);

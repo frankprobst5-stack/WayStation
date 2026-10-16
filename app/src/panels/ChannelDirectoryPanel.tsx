@@ -30,9 +30,19 @@ function ChannelDirectoryPanel() {
   const [importText, setImportText] = useState("");
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setChannels(await invoke<Channel[]>("get_channels"));
+    try {
+      setChannels(await invoke<Channel[]>("get_channels"));
+    } catch (err) {
+      // Real bug found live 2026-10-09 (same file-wide sweep as
+      // ResourcesPanel): no catch anywhere in this file meant a failed
+      // call either left `channels` stale with no indication, or (for
+      // save/remove below) silently did nothing on a user action.
+      console.error("get_channels failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -42,19 +52,25 @@ function ChannelDirectoryPanel() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!label.trim() || !frequency.trim()) return;
-    await invoke("upsert_channel", {
-      id: editingId,
-      label,
-      frequency,
-      toneOffset: toneOffset || null,
-      notes: notes || null,
-    });
-    setLabel("");
-    setFrequency("");
-    setToneOffset("");
-    setNotes("");
-    setEditingId(null);
-    refresh();
+    try {
+      await invoke("upsert_channel", {
+        id: editingId,
+        label,
+        frequency,
+        toneOffset: toneOffset || null,
+        notes: notes || null,
+      });
+      setError(null);
+      setLabel("");
+      setFrequency("");
+      setToneOffset("");
+      setNotes("");
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      console.error("upsert_channel failed:", err);
+      setError(String(err));
+    }
   }
 
   function edit(c: Channel) {
@@ -66,15 +82,21 @@ function ChannelDirectoryPanel() {
   }
 
   async function remove(id: number) {
-    await invoke("delete_channel", { id });
-    if (editingId === id) {
-      setEditingId(null);
-      setLabel("");
-      setFrequency("");
-      setToneOffset("");
-      setNotes("");
+    try {
+      await invoke("delete_channel", { id });
+      setError(null);
+      if (editingId === id) {
+        setEditingId(null);
+        setLabel("");
+        setFrequency("");
+        setToneOffset("");
+        setNotes("");
+      }
+      refresh();
+    } catch (err) {
+      console.error("delete_channel failed:", err);
+      setError(String(err));
     }
-    refresh();
   }
 
   function openShare() {
@@ -111,19 +133,33 @@ function ChannelDirectoryPanel() {
       return;
     }
 
+    // Real bug found live 2026-10-09: no catch inside this loop meant
+    // one failed item aborted the whole import with zero feedback --
+    // earlier items already saved silently, later ones silently never
+    // ran, and the textarea/status never updated to say any of that.
     let count = 0;
+    let failed = 0;
     for (const c of parsed) {
       if (!c.label || !c.frequency) continue;
-      await invoke("upsert_channel", {
-        id: null,
-        label: c.label,
-        frequency: c.frequency,
-        toneOffset: c.tone_offset ?? null,
-        notes: c.notes ?? null,
-      });
-      count++;
+      try {
+        await invoke("upsert_channel", {
+          id: null,
+          label: c.label,
+          frequency: c.frequency,
+          toneOffset: c.tone_offset ?? null,
+          notes: c.notes ?? null,
+        });
+        count++;
+      } catch (err) {
+        console.error("upsert_channel failed during import:", err);
+        failed++;
+      }
     }
-    setImportStatus(`Imported ${count} channel(s). Duplicates aren't merged — remove any manually if needed.`);
+    setImportStatus(
+      failed === 0
+        ? `Imported ${count} channel(s). Duplicates aren't merged — remove any manually if needed.`
+        : `Imported ${count} channel(s), ${failed} failed — see console for details. Duplicates aren't merged.`
+    );
     setImportText("");
     refresh();
   }
@@ -136,6 +172,8 @@ function ChannelDirectoryPanel() {
         <input value={toneOffset} onChange={(e) => setToneOffset(e.currentTarget.value)} placeholder="Tone/offset (optional)" />
         <button type="submit">{editingId !== null ? "Update" : "Add"}</button>
       </form>
+
+      {error && <div className="panel-alerts-empty">{error}</div>}
       <input
         className="channel-notes-input"
         value={notes}

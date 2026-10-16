@@ -16,14 +16,27 @@ interface DxSpot {
 function DxClusterPanel() {
   const [spots, setSpots] = useState<DxSpot[] | null>(null);
   const [hasCallsign, setHasCallsign] = useState<boolean | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   async function refresh() {
-    const [spotList, profile] = await Promise.all([
-      invoke<DxSpot[]>("get_dx_spots"),
-      invoke<{ callsign: string | null }>("get_station_profile"),
-    ]);
-    setSpots(spotList);
-    setHasCallsign(!!profile.callsign);
+    // Real bug found live 2026-10-09 (same file-wide sweep, same
+    // pattern/fix as AlertsPanel): no catch meant a failed invoke left
+    // state null forever (this panel's own loading gate below), and a
+    // naive hasCallsign:false fallback would have shown a misleading
+    // "set your callsign" message for what could just be a fetch
+    // failure -- hence the dedicated fetchError instead.
+    try {
+      const [spotList, profile] = await Promise.all([
+        invoke<DxSpot[]>("get_dx_spots"),
+        invoke<{ callsign: string | null }>("get_station_profile"),
+      ]);
+      setFetchError(null);
+      setSpots(spotList);
+      setHasCallsign(!!profile.callsign);
+    } catch (err) {
+      console.error("refresh dx spots/station profile failed:", err);
+      setFetchError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -34,6 +47,10 @@ function DxClusterPanel() {
     });
     return () => unlisten?.();
   }, []);
+
+  if (fetchError) {
+    return <div className="panel-alerts panel-alerts-empty">Could not check DX cluster: {fetchError}</div>;
+  }
 
   if (spots === null || hasCallsign === null) {
     return <div className="panel-alerts">Loading...</div>;

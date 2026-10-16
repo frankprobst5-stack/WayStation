@@ -33,7 +33,17 @@ function ContestCalendarPanel() {
   const [contests, setContests] = useState<Contest[] | null>(null);
 
   async function refresh() {
-    setContests(await invoke<Contest[]>("get_contests"));
+    // Real bug found live 2026-10-09 (same pattern as WeatherPanel/
+    // FlightTrackingPanel/StatusLights, same session): no catch meant a
+    // failed invoke left `contests` null forever, and `contests === null`
+    // is this panel's own loading gate -- so any backend failure hung the
+    // whole panel on "Loading..." permanently.
+    try {
+      setContests(await invoke<Contest[]>("get_contests"));
+    } catch (err) {
+      console.error("get_contests failed:", err);
+      setContests([]);
+    }
   }
 
   useEffect(() => {

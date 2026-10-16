@@ -58,7 +58,18 @@ function DiagnosticsPanel() {
   const [backupError, setBackupError] = useState<string | null>(null);
 
   async function refresh() {
-    setSnapshot(await invoke<ConnectivitySnapshot>("get_connectivity_state"));
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left `snapshot` null forever, and `!snapshot`
+    // below is this panel's own loading gate -- ironic for a
+    // connectivity-diagnostics panel specifically, since the one failure
+    // mode most likely to actually happen here (the backend itself being
+    // unreachable) is exactly what this bug couldn't show.
+    try {
+      setSnapshot(await invoke<ConnectivitySnapshot>("get_connectivity_state"));
+    } catch (err) {
+      console.error("get_connectivity_state failed:", err);
+      setSnapshot({ overall: "unknown", sources: [] });
+    }
   }
 
   useEffect(() => {

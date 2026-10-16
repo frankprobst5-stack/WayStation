@@ -28,14 +28,23 @@ function timeAgoLabel(heardAt: string): string {
 function PskReporterPanel() {
   const [spots, setSpots] = useState<PskSpot[] | null>(null);
   const [hasCallsign, setHasCallsign] = useState<boolean | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   async function refresh() {
-    const [spotList, profile] = await Promise.all([
-      invoke<PskSpot[]>("get_psk_spots"),
-      invoke<{ callsign: string | null }>("get_station_profile"),
-    ]);
-    setSpots(spotList);
-    setHasCallsign(!!profile.callsign);
+    // Real bug found live 2026-10-09 (same pattern/fix as AlertsPanel
+    // and DxClusterPanel, same file-wide sweep).
+    try {
+      const [spotList, profile] = await Promise.all([
+        invoke<PskSpot[]>("get_psk_spots"),
+        invoke<{ callsign: string | null }>("get_station_profile"),
+      ]);
+      setFetchError(null);
+      setSpots(spotList);
+      setHasCallsign(!!profile.callsign);
+    } catch (err) {
+      console.error("refresh psk spots/station profile failed:", err);
+      setFetchError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -46,6 +55,10 @@ function PskReporterPanel() {
     });
     return () => unlisten?.();
   }, []);
+
+  if (fetchError) {
+    return <div className="panel-alerts panel-alerts-empty">Could not check PSK Reporter: {fetchError}</div>;
+  }
 
   if (spots === null || hasCallsign === null) {
     return <div className="panel-alerts">Loading...</div>;

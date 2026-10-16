@@ -22,11 +22,20 @@ function IncidentInfoPanel() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<IncidentInfo>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    const info = await invoke<IncidentInfo>("get_incident_info");
-    setSaved(info);
-    setForm(info);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke just threw uncaught -- didn't hang the UI
+    // (saved/form already init to EMPTY, not null), but gave zero signal
+    // that the refresh failed.
+    try {
+      const info = await invoke<IncidentInfo>("get_incident_info");
+      setSaved(info);
+      setForm(info);
+    } catch (err) {
+      console.error("get_incident_info failed:", err);
+    }
   }
 
   useEffect(() => {
@@ -44,7 +53,15 @@ function IncidentInfoPanel() {
         netStatus: form.net_status || null,
       });
       setSaved(info);
+      setError(null);
       setEditing(false);
+    } catch (err) {
+      // Real bug found live 2026-10-09: the original `finally` without a
+      // `catch` meant `saving` correctly reset, but a failed save left
+      // the user stuck on the edit form with zero explanation why their
+      // changes didn't take.
+      console.error("save_incident_info failed:", err);
+      setError(String(err));
     } finally {
       setSaving(false);
     }
@@ -85,6 +102,7 @@ function IncidentInfoPanel() {
             placeholder="e.g. ACTIVE"
           />
         </label>
+        {error && <div className="panel-alerts-empty">{error}</div>}
         <div className="incident-form-actions">
           <button type="submit" disabled={saving}>
             {saving ? "Saving..." : "Save"}

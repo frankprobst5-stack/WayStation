@@ -35,7 +35,18 @@ const SEVERITY_ORDER = ["Extreme", "Severe", "Moderate", "Minor", "Unknown"];
 function useList<T>(command: string) {
   const [items, setItems] = useState<T[] | null>(null);
   useEffect(() => {
-    invoke<T[]>(command).then(setItems);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no .catch()
+    // meant a failed invoke left `items` null forever -- this hook feeds
+    // four separate SummaryCard tiles below (Incidents/Personnel/
+    // Requests/Alerts), each of which shows "Loading..." permanently
+    // when its own `items === null`. Falling back to [] unblocks all
+    // four instead of hanging.
+    invoke<T[]>(command)
+      .then(setItems)
+      .catch((err) => {
+        console.error(`${command} failed:`, err);
+        setItems([]);
+      });
   }, [command]);
   return items;
 }

@@ -22,11 +22,19 @@ const STATE_LABEL: Record<OverallState, string> = {
 function ReadinessPanel() {
   const [report, setReport] = useState<ReadinessReport | null>(null);
   const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function check() {
     setChecking(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed readiness check gave zero explanation why clicking
+    // "Prepare for Offline" appeared to do nothing.
     try {
       setReport(await invoke<ReadinessReport>("prepare_for_offline"));
+      setError(null);
+    } catch (err) {
+      console.error("prepare_for_offline failed:", err);
+      setError(String(err));
     } finally {
       setChecking(false);
     }
@@ -37,6 +45,7 @@ function ReadinessPanel() {
       <button type="button" onClick={check} disabled={checking}>
         {checking ? "Checking..." : "Prepare for Offline"}
       </button>
+      {error && <div className="panel-alerts-empty">{error}</div>}
 
       {report && (
         <div className="readiness-report">

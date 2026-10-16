@@ -31,9 +31,18 @@ function WebSdrPanel() {
   const [importText, setImportText] = useState("");
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [error, setError] = useState<string | null>(null);
 
+  // Real bug found live 2026-10-09 (same CRUD pattern/fix as
+  // ChannelDirectoryPanel and ResourcesPanel, same file-wide sweep): no
+  // catch anywhere in this file.
   async function refresh() {
-    setStations(await invoke<WebSdrStation[]>("get_websdr_stations"));
+    try {
+      setStations(await invoke<WebSdrStation[]>("get_websdr_stations"));
+    } catch (err) {
+      console.error("get_websdr_stations failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -43,19 +52,25 @@ function WebSdrPanel() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!label.trim() || !url.trim()) return;
-    await invoke("upsert_websdr_station", {
-      id: editingId,
-      label,
-      url,
-      location: location || null,
-      notes: notes || null,
-    });
-    setLabel("");
-    setUrl("");
-    setLocation("");
-    setNotes("");
-    setEditingId(null);
-    refresh();
+    try {
+      await invoke("upsert_websdr_station", {
+        id: editingId,
+        label,
+        url,
+        location: location || null,
+        notes: notes || null,
+      });
+      setError(null);
+      setLabel("");
+      setUrl("");
+      setLocation("");
+      setNotes("");
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      console.error("upsert_websdr_station failed:", err);
+      setError(String(err));
+    }
   }
 
   function edit(s: WebSdrStation) {
@@ -67,15 +82,21 @@ function WebSdrPanel() {
   }
 
   async function remove(id: number) {
-    await invoke("delete_websdr_station", { id });
-    if (editingId === id) {
-      setEditingId(null);
-      setLabel("");
-      setUrl("");
-      setLocation("");
-      setNotes("");
+    try {
+      await invoke("delete_websdr_station", { id });
+      setError(null);
+      if (editingId === id) {
+        setEditingId(null);
+        setLabel("");
+        setUrl("");
+        setLocation("");
+        setNotes("");
+      }
+      refresh();
+    } catch (err) {
+      console.error("delete_websdr_station failed:", err);
+      setError(String(err));
     }
-    refresh();
   }
 
   function openShare() {
@@ -112,19 +133,32 @@ function WebSdrPanel() {
       return;
     }
 
+    // Real bug found live 2026-10-09 (same import-loop pattern/fix as
+    // ChannelDirectoryPanel): no catch meant one failed item aborted
+    // the whole import with zero feedback.
     let count = 0;
+    let failed = 0;
     for (const s of parsed) {
       if (!s.label || !s.url) continue;
-      await invoke("upsert_websdr_station", {
-        id: null,
-        label: s.label,
-        url: s.url,
-        location: s.location ?? null,
-        notes: s.notes ?? null,
-      });
-      count++;
+      try {
+        await invoke("upsert_websdr_station", {
+          id: null,
+          label: s.label,
+          url: s.url,
+          location: s.location ?? null,
+          notes: s.notes ?? null,
+        });
+        count++;
+      } catch (err) {
+        console.error("upsert_websdr_station failed during import:", err);
+        failed++;
+      }
     }
-    setImportStatus(`Imported ${count} station(s). Duplicates aren't merged — remove any manually if needed.`);
+    setImportStatus(
+      failed === 0
+        ? `Imported ${count} station(s). Duplicates aren't merged — remove any manually if needed.`
+        : `Imported ${count} station(s), ${failed} failed — see console for details. Duplicates aren't merged.`
+    );
     setImportText("");
     refresh();
   }
@@ -140,6 +174,7 @@ function WebSdrPanel() {
         <input value={url} onChange={(e) => setUrl(e.currentTarget.value)} placeholder="URL (e.g. http://websdr.ewi.utwente.nl:8901/)" />
         <input value={location} onChange={(e) => setLocation(e.currentTarget.value)} placeholder="Location (optional)" />
         <button type="submit">{editingId !== null ? "Update" : "Add"}</button>
+        {error && <div className="panel-alerts-empty">{error}</div>}
       </form>
       <input
         className="channel-notes-input"

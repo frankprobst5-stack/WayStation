@@ -67,9 +67,14 @@ function GridSquareField({
 
   async function save() {
     setSaving(true);
+    // Real bug found live 2026-10-09 (same file-wide sweep): `finally`
+    // with no `catch` meant a failed save left the "Set" button stuck
+    // on "…" with no explanation.
     try {
       await invoke("set_resource_request_location", { requestId, gridSquare: draft.trim() || null });
       onSaved();
+    } catch (err) {
+      console.error("set_resource_request_location failed:", err);
     } finally {
       setSaving(false);
     }
@@ -102,11 +107,20 @@ function ResourceRequestsPanel() {
   const [location, setLocation] = useState("");
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>("routine");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // Real bug found live 2026-10-09 (same file-wide sweep as
+  // ResourceRequestGridSquare above): none of these four caught a
+  // failed invoke.
   async function refresh() {
-    const [reqs, allIncidents] = await Promise.all([invoke<ResourceRequest[]>("get_resource_requests"), invoke<Incident[]>("get_incidents")]);
-    setRequests(reqs);
-    setIncidents(allIncidents.filter((i) => i.status === "active"));
+    try {
+      const [reqs, allIncidents] = await Promise.all([invoke<ResourceRequest[]>("get_resource_requests"), invoke<Incident[]>("get_incidents")]);
+      setRequests(reqs);
+      setIncidents(allIncidents.filter((i) => i.status === "active"));
+    } catch (err) {
+      console.error("refresh resource requests/incidents failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -128,25 +142,41 @@ function ResourceRequestsPanel() {
         requestedBy: null,
         neededBy: null,
       });
+      setError(null);
       setResourceType("");
       setDescription("");
       setQuantity("");
       setLocation("");
       setPriority("routine");
       await refresh();
+    } catch (err) {
+      console.error("create_resource_request failed:", err);
+      setError(String(err));
     } finally {
       setCreating(false);
     }
   }
 
   async function changeStatus(requestId: number, status: string) {
-    await invoke("set_resource_request_status", { requestId, status });
-    await refresh();
+    try {
+      await invoke("set_resource_request_status", { requestId, status });
+      setError(null);
+      await refresh();
+    } catch (err) {
+      console.error("set_resource_request_status failed:", err);
+      setError(String(err));
+    }
   }
 
   async function changeIncident(requestId: number, incidentUuid: string) {
-    await invoke("set_resource_request_incident", { requestId, incidentId: incidentUuid || null });
-    await refresh();
+    try {
+      await invoke("set_resource_request_incident", { requestId, incidentId: incidentUuid || null });
+      setError(null);
+      await refresh();
+    } catch (err) {
+      console.error("set_resource_request_incident failed:", err);
+      setError(String(err));
+    }
   }
 
   return (
@@ -173,6 +203,7 @@ function ResourceRequestsPanel() {
           {creating ? "Logging…" : "Log Request"}
         </button>
       </form>
+      {error && <div className="panel-alerts-empty">{error}</div>}
 
       <div className="resource-requests-list">
         {requests.length === 0 && <div className="resource-requests-empty">No requests logged yet.</div>}

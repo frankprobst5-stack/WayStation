@@ -63,7 +63,23 @@ function RigControlPanel() {
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setStatus(await invoke<RigStatus>("get_rig_status"));
+    // Real bug found live 2026-10-09 (same file-wide sweep as several
+    // other panels): no catch meant a failed invoke left `status` null
+    // forever, and `!status` below is this panel's own loading gate.
+    // Falling back to enabled:false lands on the existing honest
+    // "not enabled" state below instead of hanging on "Loading..."
+    // forever.
+    try {
+      setStatus(await invoke<RigStatus>("get_rig_status"));
+    } catch (err) {
+      console.error("get_rig_status failed:", err);
+      setError(String(err));
+      setStatus({
+        reachable: false, enabled: false, remote_target: false, target: "",
+        frequency_hz: null, mode: null, passband_hz: null, split: null,
+        sat_mode: null, strength_db: null, detail: null,
+      });
+    }
   }
 
   useEffect(() => {

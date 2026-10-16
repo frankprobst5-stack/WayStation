@@ -152,46 +152,59 @@ function TacticalMapPanel() {
     let cancelled = false;
 
     async function init() {
-      const profile = await invoke<{ grid_square: string | null; citadel_map_host: string | null }>("get_station_profile");
-      const base = citadelBase(profile.citadel_map_host);
-      const useLocal = await probeReachable(`${base}/tiles/comms_base.pmtiles`);
-      if (cancelled || !containerRef.current) return;
+      // Real bug found live 2026-10-09: no try/catch around this whole
+      // function meant a failed get_station_profile call (the very
+      // first await) aborted map initialization entirely -- no
+      // MapLibre instance ever got created, and `mapError` (the
+      // existing display mechanism, set by the real tile-load error
+      // handler below) never got set for this earlier failure, so the
+      // map area just stayed silently blank with zero explanation.
+      try {
+        const profile = await invoke<{ grid_square: string | null; citadel_map_host: string | null }>("get_station_profile");
+        const base = citadelBase(profile.citadel_map_host);
+        const useLocal = await probeReachable(`${base}/tiles/comms_base.pmtiles`);
+        if (cancelled || !containerRef.current) return;
 
-      const style = useLocal ? (await citadelStyle(base)).style : ONLINE_STYLE;
-      if (cancelled || !containerRef.current) return;
-      setTileSource(useLocal ? "citadel" : "online");
+        const style = useLocal ? (await citadelStyle(base)).style : ONLINE_STYLE;
+        if (cancelled || !containerRef.current) return;
+        setTileSource(useLocal ? "citadel" : "online");
 
-      const map = new maplibregl.Map({
-        container: containerRef.current,
-        style,
-        center: DEFAULT_CENTER,
-        zoom: DEFAULT_ZOOM,
-      });
-      mapRef.current = map;
+        const map = new maplibregl.Map({
+          container: containerRef.current,
+          style,
+          center: DEFAULT_CENTER,
+          zoom: DEFAULT_ZOOM,
+        });
+        mapRef.current = map;
 
-      map.on("load", () => setReady(true));
-      // Only acts when "Drop Pin" mode is on -- an ordinary click just
-      // pans/inspects the map otherwise. Reads a ref, not state, since
-      // this listener is registered once at map creation.
-      map.on("click", (e) => {
-        if (!dropPinModeRef.current) return;
-        setPendingCoords({ lat: e.lngLat.lat, lon: e.lngLat.lng });
-      });
-      // MapLibre fires this for any tile/style load failure. Distinct
-      // messages because the fix is different: a broken local path means
-      // check Citadel, a broken online path means check the internet.
-      map.on("error", () => {
-        setMapError(
-          useLocal
-            ? "Citadel's map tiles stopped responding after connecting — check the cockpit service is still up."
-            : "Map tiles unavailable — Citadel's local tile server isn't reachable and this needs internet as a fallback.",
-        );
-      });
+        map.on("load", () => setReady(true));
+        // Only acts when "Drop Pin" mode is on -- an ordinary click just
+        // pans/inspects the map otherwise. Reads a ref, not state, since
+        // this listener is registered once at map creation.
+        map.on("click", (e) => {
+          if (!dropPinModeRef.current) return;
+          setPendingCoords({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+        });
+        // MapLibre fires this for any tile/style load failure. Distinct
+        // messages because the fix is different: a broken local path means
+        // check Citadel, a broken online path means check the internet.
+        map.on("error", () => {
+          setMapError(
+            useLocal
+              ? "Citadel's map tiles stopped responding after connecting — check the cockpit service is still up."
+              : "Map tiles unavailable — Citadel's local tile server isn't reachable and this needs internet as a fallback.",
+          );
+        });
 
-      const coords = profile.grid_square ? gridSquareToLatLon(profile.grid_square) : null;
-      if (coords) {
-        map.setCenter([coords.lon, coords.lat]);
-        map.setZoom(9);
+        const coords = profile.grid_square ? gridSquareToLatLon(profile.grid_square) : null;
+        if (coords) {
+          map.setCenter([coords.lon, coords.lat]);
+          map.setZoom(9);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error("tactical map init failed:", err);
+        setMapError(`Map failed to initialize: ${String(err)}`);
       }
     }
 
@@ -208,18 +221,34 @@ function TacticalMapPanel() {
     const map = mapRef.current;
     if (!map) return;
 
+    // Real bug found live 2026-10-09: no catch around this Promise.all
+    // meant a single failed source (e.g. mesh nodes unreachable) threw
+    // uncaught and skipped refreshing EVERY other pin type too (roster,
+    // resources, personnel, etc.), with zero signal to the user that the
+    // map's pins had gone stale. Fetching before clearing (moved from
+    // the original clear-then-fetch order) means a failure now leaves
+    // the last-known-good pins on screen instead of wiping them to
+    // nothing on every transient error.
+    let nodes: MeshNode[], roster: NetRosterEntry[], resources: Resource[], pins: MapMarker[],
+      personnel: Person[], resourceRequests: ResourceRequest[], aprsStations: AprsStation[];
+    try {
+      [nodes, roster, resources, pins, personnel, resourceRequests, aprsStations] = await Promise.all([
+        invoke<MeshNode[]>("get_mesh_nodes"),
+        invoke<NetRosterEntry[]>("get_net_roster"),
+        invoke<Resource[]>("get_resources"),
+        invoke<MapMarker[]>("get_markers"),
+        invoke<Person[]>("get_personnel"),
+        invoke<ResourceRequest[]>("get_resource_requests"),
+        invoke<AprsStation[]>("get_aprs_stations"),
+      ]);
+    } catch (err) {
+      console.error("refreshPins failed:", err);
+      setMapError(`Could not refresh map pins: ${String(err)}`);
+      return; // leave the last-known-good pins on screen rather than wiping them on a transient error
+    }
+
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-
-    const [nodes, roster, resources, pins, personnel, resourceRequests, aprsStations] = await Promise.all([
-      invoke<MeshNode[]>("get_mesh_nodes"),
-      invoke<NetRosterEntry[]>("get_net_roster"),
-      invoke<Resource[]>("get_resources"),
-      invoke<MapMarker[]>("get_markers"),
-      invoke<Person[]>("get_personnel"),
-      invoke<ResourceRequest[]>("get_resource_requests"),
-      invoke<AprsStation[]>("get_aprs_stations"),
-    ]);
 
     // `onRemove` is only passed for actual map_markers rows (the pins an
     // operator drops) -- mesh nodes, roster check-ins, resources,
@@ -287,8 +316,15 @@ function TacticalMapPanel() {
       const color = MARKER_COLORS[p.marker_type] || MARKER_COLORS.info;
       const from = p.origin_station ? ` — ${p.origin_station}` : "";
       addPin(p.latitude, p.longitude, color, `${p.label}${from} (${markerStatusText(p)})`, async () => {
-        await invoke("delete_marker", { id: p.id });
-        refreshPins();
+        try {
+          await invoke("delete_marker", { id: p.id });
+          refreshPins();
+        } catch (err) {
+          // Real bug found live 2026-10-09: no catch meant clicking to
+          // delete a pin silently did nothing on failure.
+          console.error("delete_marker failed:", err);
+          setMapError(`Could not delete marker: ${String(err)}`);
+        }
       });
     }
     for (const person of personnel) {
@@ -318,13 +354,18 @@ function TacticalMapPanel() {
   }, [ready, selectedIncident]);
 
   useEffect(() => {
-    invoke<Incident[]>("get_incidents").then(setIncidents);
+    invoke<Incident[]>("get_incidents")
+      .then(setIncidents)
+      .catch((err) => console.error("get_incidents failed:", err));
   }, []);
 
   async function submitPin(e: React.FormEvent) {
     e.preventDefault();
     if (!pendingCoords || !pinLabel.trim()) return;
     setPinBusy(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed pin creation/dispatch left the drop-pin form stuck open
+    // with no explanation why nothing was added to the map.
     try {
       const marker = await invoke<MapMarker>("create_marker", {
         label: pinLabel.trim(),
@@ -334,11 +375,15 @@ function TacticalMapPanel() {
         toStation: pinTo.trim() || null,
       });
       await invoke("dispatch_marker", { markerId: marker.id });
+      setMapError(null);
       setPinLabel("");
       setPinTo("");
       setPendingCoords(null);
       setDropPinMode(false);
       refreshPins();
+    } catch (err) {
+      console.error("create_marker/dispatch_marker failed:", err);
+      setMapError(`Could not create marker: ${String(err)}`);
     } finally {
       setPinBusy(false);
     }

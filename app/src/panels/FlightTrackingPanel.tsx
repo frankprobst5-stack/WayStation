@@ -344,7 +344,18 @@ function FlightTrackingPanel() {
   const [selected, setSelected] = useState<AircraftTrack | null>(null);
 
   async function refresh() {
-    setTracks(await invoke<AircraftTrack[]>("get_aircraft_tracks"));
+    // Real bug found live 2026-10-09, same pattern as WeatherPanel's
+    // useForecast: no catch here meant a failed invoke left `tracks`
+    // null forever, and `tracks === null` below is this panel's own
+    // loading gate -- so any backend failure (ADS-B source unreachable,
+    // etc.) hung the whole panel on "Loading..." permanently instead of
+    // the honest empty-tracks message already rendered at line 237.
+    try {
+      setTracks(await invoke<AircraftTrack[]>("get_aircraft_tracks"));
+    } catch (err) {
+      console.error("get_aircraft_tracks failed:", err);
+      setTracks([]);
+    }
   }
 
   useEffect(() => {

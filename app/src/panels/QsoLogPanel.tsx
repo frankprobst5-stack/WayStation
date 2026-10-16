@@ -45,9 +45,17 @@ function QsoLogPanel() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportText, setExportText] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setEntries(await invoke<QsoLogEntry[]>("get_qso_log"));
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch in
+    // any of this file's five invoke call sites.
+    try {
+      setEntries(await invoke<QsoLogEntry[]>("get_qso_log"));
+    } catch (err) {
+      console.error("get_qso_log failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -76,22 +84,28 @@ function QsoLogPanel() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!call.trim() || !qsoDate.trim() || !timeOn.trim() || !mode.trim()) return;
-    await invoke("upsert_qso_log_entry", {
-      id: editingId,
-      call: call.toUpperCase(),
-      qsoDate,
-      timeOn,
-      band: band || null,
-      freqMhz: freqMhz ? Number(freqMhz) : null,
-      mode,
-      rstSent: rstSent || null,
-      rstRcvd: rstRcvd || null,
-      name: name || null,
-      gridsquare: gridsquare || null,
-      comment: comment || null,
-    });
-    resetForm();
-    refresh();
+    try {
+      await invoke("upsert_qso_log_entry", {
+        id: editingId,
+        call: call.toUpperCase(),
+        qsoDate,
+        timeOn,
+        band: band || null,
+        freqMhz: freqMhz ? Number(freqMhz) : null,
+        mode,
+        rstSent: rstSent || null,
+        rstRcvd: rstRcvd || null,
+        name: name || null,
+        gridsquare: gridsquare || null,
+        comment: comment || null,
+      });
+      setError(null);
+      resetForm();
+      refresh();
+    } catch (err) {
+      console.error("upsert_qso_log_entry failed:", err);
+      setError(String(err));
+    }
   }
 
   function edit(q: QsoLogEntry) {
@@ -110,15 +124,26 @@ function QsoLogPanel() {
   }
 
   async function remove(id: number) {
-    await invoke("delete_qso_log_entry", { id });
-    if (editingId === id) resetForm();
-    refresh();
+    try {
+      await invoke("delete_qso_log_entry", { id });
+      setError(null);
+      if (editingId === id) resetForm();
+      refresh();
+    } catch (err) {
+      console.error("delete_qso_log_entry failed:", err);
+      setError(String(err));
+    }
   }
 
   async function openExport() {
-    setExportText(await invoke<string>("export_qso_log_adif"));
-    setCopyState("idle");
-    setExportOpen(true);
+    try {
+      setExportText(await invoke<string>("export_qso_log_adif"));
+      setCopyState("idle");
+      setExportOpen(true);
+    } catch (err) {
+      console.error("export_qso_log_adif failed:", err);
+      setError(String(err));
+    }
   }
 
   async function copyExport() {
@@ -159,6 +184,7 @@ function QsoLogPanel() {
           ))}
         </select>
         <input value={mode} onChange={(e) => setMode(e.currentTarget.value)} placeholder="Mode (SSB, CW, FT8...)" />
+        {error && <div className="panel-alerts-empty">{error}</div>}
         <button type="submit">{editingId !== null ? "Update" : "Log QSO"}</button>
       </form>
       <div className="resource-form channel-form">

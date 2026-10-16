@@ -23,9 +23,20 @@ function ResourcesPanel() {
   const [tokens, setTokens] = useState("");
   const [gridSquare, setGridSquare] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setResources(await invoke<Resource[]>("get_resources"));
+    try {
+      setResources(await invoke<Resource[]>("get_resources"));
+    } catch (err) {
+      // Real bug found live 2026-10-09: no catch here meant a failed
+      // fetch left `resources` at whatever it last was with zero
+      // indication anything went wrong -- same honest-failure gap as
+      // this whole file's other two unguarded calls below, just without
+      // a loading-gate hang since this one already initializes to [].
+      console.error("get_resources failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -35,12 +46,22 @@ function ResourcesPanel() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!label.trim() || !tokens.trim()) return;
-    await invoke("upsert_resource", { id: editingId, label, rawTokens: tokens, gridSquare: gridSquare || null });
-    setLabel("");
-    setTokens("");
-    setGridSquare("");
-    setEditingId(null);
-    refresh();
+    // Real bug found live 2026-10-09: no catch meant a failed save
+    // silently did nothing -- the form didn't clear, nothing was added
+    // to the list, and the user had no idea why clicking "Add"/"Update"
+    // appeared to do nothing.
+    try {
+      await invoke("upsert_resource", { id: editingId, label, rawTokens: tokens, gridSquare: gridSquare || null });
+      setError(null);
+      setLabel("");
+      setTokens("");
+      setGridSquare("");
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      console.error("upsert_resource failed:", err);
+      setError(String(err));
+    }
   }
 
   function edit(r: Resource) {
@@ -51,14 +72,20 @@ function ResourcesPanel() {
   }
 
   async function remove(id: number) {
-    await invoke("delete_resource", { id });
-    if (editingId === id) {
-      setEditingId(null);
-      setLabel("");
-      setTokens("");
-      setGridSquare("");
+    try {
+      await invoke("delete_resource", { id });
+      setError(null);
+      if (editingId === id) {
+        setEditingId(null);
+        setLabel("");
+        setTokens("");
+        setGridSquare("");
+      }
+      refresh();
+    } catch (err) {
+      console.error("delete_resource failed:", err);
+      setError(String(err));
     }
-    refresh();
   }
 
   return (
@@ -77,6 +104,8 @@ function ResourcesPanel() {
         />
         <button type="submit">{editingId !== null ? "Update" : "Add"}</button>
       </form>
+
+      {error && <div className="panel-alerts-empty">{error}</div>}
 
       {resources.length === 0 ? (
         <div className="panel-alerts-empty">No resources tracked yet.</div>

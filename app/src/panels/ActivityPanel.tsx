@@ -29,7 +29,17 @@ interface QsoLogEntry { call: string; qso_date: string }
 function useCount<T>(command: string) {
   const [items, setItems] = useState<T[] | null>(null);
   useEffect(() => {
-    invoke<T[]>(command).then(setItems);
+    // Real bug found live 2026-10-09 (same file-wide sweep, same hook
+    // pattern/fix as IncidentOpsPanel's useList): no catch meant a
+    // failed invoke left `items` null forever -- this hook feeds
+    // SummaryCard tiles below that show "Loading..." while items is
+    // null, so a failure hung that tile permanently.
+    invoke<T[]>(command)
+      .then(setItems)
+      .catch((err) => {
+        console.error(`${command} failed:`, err);
+        setItems([]);
+      });
   }, [command]);
   return items;
 }

@@ -12,10 +12,23 @@ interface SoftwareEntry {
 
 function RequiredSoftwarePanel() {
   const [software, setSoftware] = useState<SoftwareEntry[] | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<SoftwareEntry[]>("get_required_software").then(setSoftware);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left `software` null forever, and
+    // `!software` below is this panel's own loading gate.
+    invoke<SoftwareEntry[]>("get_required_software")
+      .then(setSoftware)
+      .catch((err) => {
+        console.error("get_required_software failed:", err);
+        setFetchError(String(err));
+      });
   }, []);
+
+  if (fetchError) {
+    return <div className="panel-required-software panel-alerts-empty">Could not check installed software: {fetchError}</div>;
+  }
 
   if (!software) {
     return <div className="panel-required-software">Loading...</div>;

@@ -45,7 +45,15 @@ function IncidentTimeline({ incidentUuid }: { incidentUuid: string }) {
   const [events, setEvents] = useState<IncidentEvent[] | null>(null);
 
   useEffect(() => {
-    invoke<IncidentEvent[]>("get_incident_events", { incidentId: incidentUuid }).then(setEvents);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no .catch()
+    // meant a failed fetch left `events` null forever, and `events ===
+    // null` below is this component's own loading gate.
+    invoke<IncidentEvent[]>("get_incident_events", { incidentId: incidentUuid })
+      .then(setEvents)
+      .catch((err) => {
+        console.error("get_incident_events failed:", err);
+        setEvents([]);
+      });
   }, [incidentUuid]);
 
   if (events === null) return <div className="incident-timeline incident-timeline-loading">Loading timeline…</div>;
@@ -71,9 +79,15 @@ function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [narratives, setNarratives] = useState<Record<number, NarrativeState>>({});
+  const [sitrepError, setSitrepError] = useState<string | null>(null);
 
   async function refresh() {
-    setSitreps(await invoke<Sitrep[]>("get_sitreps", { incidentId: incidentUuid }));
+    try {
+      setSitreps(await invoke<Sitrep[]>("get_sitreps", { incidentId: incidentUuid }));
+    } catch (err) {
+      console.error("get_sitreps failed:", err);
+      setSitrepError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -82,9 +96,17 @@ function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
 
   async function generate() {
     setGenerating(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant
+    // `generating` correctly reset on failure, but a failed
+    // create_sitrep/refresh gave the user zero explanation why clicking
+    // "Generate" appeared to do nothing.
     try {
       await invoke("create_sitrep", { incidentId: incidentUuid, createdBy: null });
+      setSitrepError(null);
       await refresh();
+    } catch (err) {
+      console.error("create_sitrep failed:", err);
+      setSitrepError(String(err));
     } finally {
       setGenerating(false);
     }
@@ -116,6 +138,7 @@ function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
           {generating ? "Generating…" : "Generate New SITREP"}
         </button>
       </div>
+      {sitrepError && <div className="panel-alerts-empty">{sitrepError}</div>}
       {sitreps.map((sitrep) => (
         <div key={sitrep.id} className="incident-sitrep-row">
           <div className="incident-sitrep-row-head">
@@ -164,9 +187,17 @@ function IncidentsPanel() {
   const [creating, setCreating] = useState(false);
   const [closingId, setClosingId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<{ uuid: string; section: ExpandedSection }>({ uuid: "", section: null });
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setIncidents(await invoke<Incident[]>("get_incidents"));
+    // Real bug found live 2026-10-09 (same file-wide sweep, see
+    // IncidentTimeline/IncidentSitreps above): no catch here.
+    try {
+      setIncidents(await invoke<Incident[]>("get_incidents"));
+    } catch (err) {
+      console.error("get_incidents failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -177,11 +208,18 @@ function IncidentsPanel() {
     e.preventDefault();
     if (!name.trim()) return;
     setCreating(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed create silently left the form filled in with zero
+    // explanation why nothing happened.
     try {
       await invoke("create_incident", { name: name.trim(), description: description.trim() || null });
+      setError(null);
       setName("");
       setDescription("");
       await refresh();
+    } catch (err) {
+      console.error("create_incident failed:", err);
+      setError(String(err));
     } finally {
       setCreating(false);
     }
@@ -191,7 +229,11 @@ function IncidentsPanel() {
     setClosingId(id);
     try {
       await invoke("close_incident", { incidentId: id });
+      setError(null);
       await refresh();
+    } catch (err) {
+      console.error("close_incident failed:", err);
+      setError(String(err));
     } finally {
       setClosingId(null);
     }
@@ -262,6 +304,7 @@ function IncidentsPanel() {
           {creating ? "Creating…" : "Declare Incident"}
         </button>
       </form>
+      {error && <div className="panel-alerts-empty">{error}</div>}
 
       <div className="incidents-section">
         <h3>Active ({active.length})</h3>

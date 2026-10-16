@@ -25,9 +25,21 @@ function NetControlPanel() {
   const [callsign, setCallsign] = useState("");
   const [name, setName] = useState("");
   const [gridSquare, setGridSquare] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
+  // Real bug found live 2026-10-09 (same file-wide sweep): none of the
+  // five functions below caught a failed invoke -- refresh() just left
+  // the roster stale with no signal, and the four write actions
+  // (check-in/out, mark heard, clear) silently did nothing on failure,
+  // with no indication to the net control operator that their action
+  // didn't take.
   async function refresh() {
-    setRoster(await invoke<RosterEntry[]>("get_net_roster"));
+    try {
+      setRoster(await invoke<RosterEntry[]>("get_net_roster"));
+    } catch (err) {
+      console.error("get_net_roster failed:", err);
+      setError(String(err));
+    }
   }
 
   useEffect(() => {
@@ -37,32 +49,56 @@ function NetControlPanel() {
   async function checkIn(e: React.FormEvent) {
     e.preventDefault();
     if (!callsign.trim()) return;
-    await invoke("check_in_station", {
-      callsign: callsign.toUpperCase(),
-      name: name || null,
-      notes: null,
-      gridSquare: gridSquare || null,
-    });
-    setCallsign("");
-    setName("");
-    setGridSquare("");
-    refresh();
+    try {
+      await invoke("check_in_station", {
+        callsign: callsign.toUpperCase(),
+        name: name || null,
+        notes: null,
+        gridSquare: gridSquare || null,
+      });
+      setError(null);
+      setCallsign("");
+      setName("");
+      setGridSquare("");
+      refresh();
+    } catch (err) {
+      console.error("check_in_station failed:", err);
+      setError(String(err));
+    }
   }
 
   async function checkOut(id: number) {
-    await invoke("check_out_station", { id });
-    refresh();
+    try {
+      await invoke("check_out_station", { id });
+      setError(null);
+      refresh();
+    } catch (err) {
+      console.error("check_out_station failed:", err);
+      setError(String(err));
+    }
   }
 
   async function markHeard(id: number) {
-    await invoke("mark_heard", { id });
-    refresh();
+    try {
+      await invoke("mark_heard", { id });
+      setError(null);
+      refresh();
+    } catch (err) {
+      console.error("mark_heard failed:", err);
+      setError(String(err));
+    }
   }
 
   async function clearRoster() {
     if (!window.confirm("Clear the entire net roster? This starts a fresh net session.")) return;
-    await invoke("clear_net_roster");
-    refresh();
+    try {
+      await invoke("clear_net_roster");
+      setError(null);
+      refresh();
+    } catch (err) {
+      console.error("clear_net_roster failed:", err);
+      setError(String(err));
+    }
   }
 
   return (
@@ -81,6 +117,7 @@ function NetControlPanel() {
           placeholder="Grid square (optional, for the map)"
           className="net-grid-input"
         />
+        {error && <div className="panel-alerts-empty">{error}</div>}
         <button type="submit">Check In</button>
       </form>
 

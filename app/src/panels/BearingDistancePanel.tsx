@@ -15,11 +15,23 @@ function BearingDistancePanel() {
   const [target, setTarget] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<{ grid_square: string | null }>("get_station_profile").then((p) => {
-      setStationGrid(p.grid_square);
-    });
+    // Real bug found live 2026-10-09 (same file-wide sweep): no .catch()
+    // meant a failed invoke left `stationGrid` null forever, and
+    // `stationGrid === null` below is this panel's own gate -- which
+    // would have shown a misleading "set your grid square" message even
+    // if it genuinely is set and the fetch just failed, hence the
+    // dedicated fetchError instead.
+    invoke<{ grid_square: string | null }>("get_station_profile")
+      .then((p) => {
+        setStationGrid(p.grid_square);
+      })
+      .catch((err) => {
+        console.error("get_station_profile failed:", err);
+        setFetchError(String(err));
+      });
   }, []);
 
   function calculate(e: React.FormEvent) {
@@ -47,6 +59,10 @@ function BearingDistancePanel() {
       bearing,
       compass: compassPoint(bearing),
     });
+  }
+
+  if (fetchError) {
+    return <div className="panel-bearing panel-alerts-empty">Could not load your station profile: {fetchError}</div>;
   }
 
   if (stationGrid === null) {

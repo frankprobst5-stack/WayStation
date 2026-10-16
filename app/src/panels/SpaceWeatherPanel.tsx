@@ -92,7 +92,24 @@ function SpaceWeatherPanel() {
   const [sw, setSw] = useState<SpaceWeather | null>(null);
 
   async function refresh() {
-    setSw(await invoke<SpaceWeather>("get_space_weather"));
+    // Real bug found live 2026-10-09 (same pattern across this file
+    // sweep): no catch meant a failed invoke left `sw` null forever, and
+    // `!sw` is this panel's own loading gate. Falling back to an
+    // all-null object (every field is already nullable) unblocks the
+    // gate and lands on the existing honest "No data yet" state below
+    // instead of hanging on "Loading..." forever.
+    try {
+      setSw(await invoke<SpaceWeather>("get_space_weather"));
+    } catch (err) {
+      console.error("get_space_weather failed:", err);
+      setSw({
+        fetched_at: null, updated_label: null, solar_flux: null, a_index: null, k_index: null,
+        sunspots: null, xray: null, proton_flux: null, electron_flux: null, aurora: null,
+        solar_wind: null, magnetic_field: null, geomag_field: null, signal_noise: null,
+        band_conditions: null, r_scale: null, r_text: null, s_scale: null, s_text: null,
+        g_scale: null, g_text: null,
+      });
+    }
   }
 
   useEffect(() => {

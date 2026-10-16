@@ -16,11 +16,24 @@ function Js8CallPanel() {
   const [inbox, setInbox] = useState<Js8CallMessage[]>([]);
 
   async function refresh() {
-    const s = await invoke<Js8CallStatus>("get_js8call_status");
-    setStatus(s);
-    if (s.reachable) {
-      setInbox(await invoke<Js8CallMessage[]>("get_js8call_inbox"));
-    } else {
+    // Real bug found live 2026-10-09 (same pattern across this whole
+    // file sweep): no catch meant a failed invoke left `status` null
+    // forever, and `!status` is this panel's own loading gate -- so any
+    // backend failure hung the whole panel on "Loading..." permanently.
+    // Falling back to an honest "not reachable" status, not leaving it
+    // null, unblocks the gate the same way a real unreachable JS8Call
+    // instance already does.
+    try {
+      const s = await invoke<Js8CallStatus>("get_js8call_status");
+      setStatus(s);
+      if (s.reachable) {
+        setInbox(await invoke<Js8CallMessage[]>("get_js8call_inbox"));
+      } else {
+        setInbox([]);
+      }
+    } catch (err) {
+      console.error("js8call status/inbox fetch failed:", err);
+      setStatus({ reachable: false, callsign: null, detail: String(err) });
       setInbox([]);
     }
   }

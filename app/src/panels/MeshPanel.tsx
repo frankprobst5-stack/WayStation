@@ -111,15 +111,32 @@ function MeshPanel() {
   const [reconnecting, setReconnecting] = useState(false);
 
   async function refreshNodes() {
-    setNodes(await invoke<MeshNode[]>("get_mesh_nodes"));
+    try {
+      setNodes(await invoke<MeshNode[]>("get_mesh_nodes"));
+    } catch (err) {
+      console.error("get_mesh_nodes failed:", err);
+    }
   }
 
   async function refreshMessages() {
-    setMessages(await invoke<MeshMessage[]>("get_mesh_messages"));
+    try {
+      setMessages(await invoke<MeshMessage[]>("get_mesh_messages"));
+    } catch (err) {
+      console.error("get_mesh_messages failed:", err);
+    }
   }
 
   async function refreshStatus() {
-    setStatus(await invoke<MeshStatus>("get_mesh_status"));
+    // `status` is read everywhere below via `status?.` so a failure
+    // leaving it at its last value (or null) doesn't hang any render the
+    // way the panels in this same sweep did -- still worth catching so a
+    // real failure shows up in the console instead of an unhandled
+    // rejection, found live 2026-10-09.
+    try {
+      setStatus(await invoke<MeshStatus>("get_mesh_status"));
+    } catch (err) {
+      console.error("get_mesh_status failed:", err);
+    }
   }
 
   useEffect(() => {
@@ -254,14 +271,26 @@ function MeshPanel() {
 
   async function reconnect() {
     setReconnecting(true);
-    await invoke("reconnect_mesh");
-    // The poller drops the socket, then retries within about a second.
-    // Give it a beat before reporting whatever state it landed in, rather
-    // than showing a stale "Connected" from the link just torn down.
-    setTimeout(async () => {
-      await refreshStatus();
+    // Real bug found live 2026-10-09: no catch meant a failed
+    // reconnect_mesh call left `reconnecting` stuck true forever -- the
+    // Reconnect button disables while reconnecting (see the render
+    // below), so a failure here permanently locked the user out of ever
+    // retrying without restarting the app.
+    try {
+      await invoke("reconnect_mesh");
+      // The poller drops the socket, then retries within about a second.
+      // Give it a beat before reporting whatever state it landed in,
+      // rather than showing a stale "Connected" from the link just torn
+      // down.
+      setTimeout(async () => {
+        await refreshStatus();
+        setReconnecting(false);
+      }, 2500);
+    } catch (err) {
+      console.error("reconnect_mesh failed:", err);
+      setActionError(String(err));
       setReconnecting(false);
-    }, 2500);
+    }
   }
 
   return (

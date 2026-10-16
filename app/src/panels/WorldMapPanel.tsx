@@ -80,9 +80,14 @@ function WorldMapPanel() {
   const [hover, setHover] = useState<{ x: number; y: number; marker: MapMarker } | null>(null);
 
   useEffect(() => {
-    invoke<{ grid_square: string | null }>("get_station_profile").then((p) => {
-      if (p.grid_square) setStation(gridSquareToLatLon(p.grid_square));
-    });
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch --
+    // low severity here (just means no station dot drawn on the map),
+    // but still an unlogged uncaught rejection on failure.
+    invoke<{ grid_square: string | null }>("get_station_profile")
+      .then((p) => {
+        if (p.grid_square) setStation(gridSquareToLatLon(p.grid_square));
+      })
+      .catch((err) => console.error("get_station_profile failed:", err));
   }, []);
 
   // Three data sources genuinely carry a real location: POTA spots have
@@ -92,11 +97,21 @@ function WorldMapPanel() {
   // coordinates, and guessing a location from a callsign prefix would
   // need a verified DXCC country/prefix database this app doesn't have.
   async function refreshMarkers() {
-    const [potaSpots, pskSpots, qsoLog] = await Promise.all([
-      invoke<PotaSpot[]>("get_pota_spots"),
-      invoke<PskSpot[]>("get_psk_spots"),
-      invoke<QsoLogEntry[]>("get_qso_log"),
-    ]);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant one failed source aborted the whole marker refresh with no
+    // signal -- `markers` already inits to [], so not a Loading-gate
+    // hang, but a silent stale-map failure either way.
+    let potaSpots: PotaSpot[], pskSpots: PskSpot[], qsoLog: QsoLogEntry[];
+    try {
+      [potaSpots, pskSpots, qsoLog] = await Promise.all([
+        invoke<PotaSpot[]>("get_pota_spots"),
+        invoke<PskSpot[]>("get_psk_spots"),
+        invoke<QsoLogEntry[]>("get_qso_log"),
+      ]);
+    } catch (err) {
+      console.error("refreshMarkers failed:", err);
+      return;
+    }
 
     const next: MapMarker[] = [];
 

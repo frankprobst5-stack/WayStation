@@ -16,7 +16,19 @@ function PacketPanel() {
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    setStatus(await invoke<DirewolfStatus>("get_direwolf_status"));
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left `status` null forever, and `!status`
+    // below is this panel's own loading gate.
+    try {
+      setStatus(await invoke<DirewolfStatus>("get_direwolf_status"));
+    } catch (err) {
+      console.error("get_direwolf_status failed:", err);
+      setError(String(err));
+      setStatus({
+        binary_found: false, callsign_configured: false, process_running: false,
+        agw_reachable: false, kiss_reachable: false,
+      });
+    }
   }
 
   useEffect(() => {
@@ -43,9 +55,16 @@ function PacketPanel() {
 
   async function stop() {
     setBusy(true);
+    setError(null);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed stop_direwolf gave zero explanation why the Stop button
+    // appeared to do nothing (busy correctly reset, but silently).
     try {
       await invoke("stop_direwolf");
       await refresh();
+    } catch (err) {
+      console.error("stop_direwolf failed:", err);
+      setError(String(err));
     } finally {
       setBusy(false);
     }

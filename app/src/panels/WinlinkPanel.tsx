@@ -27,12 +27,26 @@ function WinlinkPanel() {
   const [status, setStatus] = useState<WinlinkStatus | null>(null);
   const [inbox, setInbox] = useState<WinlinkMessage[]>([]);
   const [restarting, setRestarting] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   async function refresh() {
-    const s = await invoke<WinlinkStatus>("get_winlink_status");
-    setStatus(s);
-    if (s.api_reachable) {
-      setInbox(await invoke<WinlinkMessage[]>("get_winlink_inbox"));
+    // Real bug found live 2026-10-09 (same pattern as Js8CallPanel, same
+    // file-wide sweep): no catch meant a failed invoke left `status`
+    // null forever, and `!status` below is this panel's own loading
+    // gate. A dedicated fetchError (checked before the binary_found
+    // branch below) rather than faking binary_found:false -- that would
+    // have shown a misleading "Pat isn't installed" message for what
+    // could just be an unrelated backend/IPC failure.
+    try {
+      const s = await invoke<WinlinkStatus>("get_winlink_status");
+      setFetchError(null);
+      setStatus(s);
+      if (s.api_reachable) {
+        setInbox(await invoke<WinlinkMessage[]>("get_winlink_inbox"));
+      }
+    } catch (err) {
+      console.error("winlink status/inbox fetch failed:", err);
+      setFetchError(String(err));
     }
   }
 
@@ -44,13 +58,23 @@ function WinlinkPanel() {
 
   async function restart() {
     setRestarting(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed restart gave zero explanation why clicking "Restart"
+    // appeared to do nothing (restarting correctly reset, but silently).
     try {
       await invoke("restart_winlink_service");
       await new Promise((r) => setTimeout(r, 1500)); // give the process a moment to bind its port
       await refresh();
+    } catch (err) {
+      console.error("restart_winlink_service failed:", err);
+      setFetchError(String(err));
     } finally {
       setRestarting(false);
     }
+  }
+
+  if (fetchError) {
+    return <div className="panel-winlink panel-alerts-empty">Could not check Winlink status: {fetchError}</div>;
   }
 
   if (!status) {

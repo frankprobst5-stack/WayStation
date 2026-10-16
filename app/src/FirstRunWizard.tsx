@@ -46,16 +46,37 @@ function FirstRunWizard({ onFinished }: { onFinished: () => void }) {
   const [operatorName, setOperatorName] = useState("");
   const [citadelMapHost, setCitadelMapHost] = useState("");
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
-    invoke<StationProfile>("get_station_profile").then((p) => {
-      setProfile(p);
-      setVisible(!p.callsign || !p.callsign.trim());
-      setCallsign(p.callsign ?? "");
-      setGridSquare(p.grid_square ?? "");
-      setOperatorName(p.operator_name ?? "");
-      setCitadelMapHost(p.citadel_map_host ?? "");
-    });
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left `profile` null forever -- `!profile`
+    // below means the wizard just never appears at all on failure, with
+    // zero indication to a brand-new user why onboarding didn't start.
+    invoke<StationProfile>("get_station_profile")
+      .then((p) => {
+        setProfile(p);
+        setVisible(!p.callsign || !p.callsign.trim());
+        setCallsign(p.callsign ?? "");
+        setGridSquare(p.grid_square ?? "");
+        setOperatorName(p.operator_name ?? "");
+        setCitadelMapHost(p.citadel_map_host ?? "");
+      })
+      .catch((err) => {
+        console.error("get_station_profile failed:", err);
+        setLoadError(String(err));
+      });
   }, []);
+
+  if (loadError) {
+    return (
+      <div className="wizard-overlay">
+        <div className="wizard-modal panel-alerts-empty" role="dialog" aria-modal="true" aria-label="Setup failed">
+          Could not start setup: {loadError}
+        </div>
+      </div>
+    );
+  }
 
   if (!visible || !profile) return null;
 
@@ -64,8 +85,16 @@ function FirstRunWizard({ onFinished }: { onFinished: () => void }) {
   const resolvedGrid = gridValid ? gridSquareToLatLon(gridSquare) : null;
   const canLeaveIdentity = callsign.trim() !== "" && gridValid;
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   async function persist(overrides: Partial<StationProfile>) {
     setSaving(true);
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed save during first-run setup silently did nothing -- next()
+    // below awaits this with no try/catch of its own either, so the
+    // exception propagated straight out, setStepIndex never ran, and a
+    // brand-new user clicking "Next" would just see nothing happen with
+    // zero explanation.
     try {
       const merged = { ...profile, ...overrides } as StationProfile;
       const updated = await invoke<StationProfile>("save_station_profile", {
@@ -81,7 +110,12 @@ function FirstRunWizard({ onFinished }: { onFinished: () => void }) {
         citadelMapHost: merged.citadel_map_host || null,
       });
       setProfile(updated);
+      setSaveError(null);
       return updated;
+    } catch (err) {
+      console.error("save_station_profile failed:", err);
+      setSaveError(String(err));
+      return null;
     } finally {
       setSaving(false);
     }
@@ -90,9 +124,11 @@ function FirstRunWizard({ onFinished }: { onFinished: () => void }) {
   async function next() {
     if (step === "identity") {
       if (!canLeaveIdentity) return;
-      await persist({ callsign: callsign.trim().toUpperCase(), grid_square: gridSquare.trim().toUpperCase(), operator_name: operatorName.trim() || null });
+      const result = await persist({ callsign: callsign.trim().toUpperCase(), grid_square: gridSquare.trim().toUpperCase(), operator_name: operatorName.trim() || null });
+      if (result === null) return; // save failed -- stay on this step, error is shown below
     } else if (step === "citadel") {
-      await persist({ citadel_map_host: citadelMapHost.trim() || null });
+      const result = await persist({ citadel_map_host: citadelMapHost.trim() || null });
+      if (result === null) return;
     }
     setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
   }
@@ -128,6 +164,8 @@ function FirstRunWizard({ onFinished }: { onFinished: () => void }) {
             <span key={s} className={`wizard-progress-dot ${i <= stepIndex ? "wizard-progress-dot-done" : ""}`} />
           ))}
         </div>
+
+        {saveError && <div className="panel-alerts-empty">{saveError}</div>}
 
         {step === "welcome" && (
           <>

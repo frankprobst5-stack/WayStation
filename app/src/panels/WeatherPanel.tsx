@@ -69,7 +69,18 @@ function useLocalObservation() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     async function refresh() {
-      setObs(await invoke<LocalWeatherObservation>("get_local_weather_observation"));
+      try {
+        setObs(await invoke<LocalWeatherObservation>("get_local_weather_observation"));
+      } catch (err) {
+        // Real bug found live 2026-10-09: this had no catch at all, so a
+        // failed invoke (backend error, not just "not configured") left
+        // `obs` stuck at its initial `null` forever with zero signal --
+        // indistinguishable from "still loading" to CurrentConditionsCard,
+        // which already treats null as "not configured" below. Logging
+        // here at least surfaces the real failure for debugging instead
+        // of a silent unhandled rejection.
+        console.error("get_local_weather_observation failed:", err);
+      }
     }
     refresh();
     listen("local-weather-changed", refresh).then((fn) => {
@@ -85,7 +96,21 @@ function useForecast() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     async function refresh() {
-      setPeriods(await invoke<ForecastPeriod[]>("get_forecast_periods"));
+      try {
+        setPeriods(await invoke<ForecastPeriod[]>("get_forecast_periods"));
+      } catch (err) {
+        // Real, high-impact bug found live 2026-10-09: `periods === null`
+        // is WeatherPanel's own top-level loading gate (see below) -- with
+        // no catch here, a single failed `get_forecast_periods` call (NWS
+        // unreachable, grid square misconfigured, any backend error) left
+        // the ENTIRE weather panel stuck on a bare "Loading..." forever,
+        // hiding Active Alerts/Current Conditions/SPC Outlook/Radar too,
+        // not just the forecast section. Falling back to `[]` (not
+        // leaving it null) unblocks the gate -- NwsForecastTab already
+        // renders an honest "No forecast yet" message for an empty array.
+        console.error("get_forecast_periods failed:", err);
+        setPeriods([]);
+      }
     }
     refresh();
     listen("forecast-changed", refresh).then((fn) => {
@@ -101,7 +126,12 @@ function useAlertSummaries() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     async function refresh() {
-      setAlerts(await invoke<AlertSummary[]>("get_alerts"));
+      try {
+        setAlerts(await invoke<AlertSummary[]>("get_alerts"));
+      } catch (err) {
+        console.error("get_alerts failed:", err);
+        setAlerts([]);
+      }
     }
     refresh();
     listen("alerts-changed", refresh).then((fn) => {
@@ -149,7 +179,11 @@ function useNwsCurrentObservation() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     async function refresh() {
-      setObs(await invoke<NwsCurrentObservation>("get_nws_current_observation"));
+      try {
+        setObs(await invoke<NwsCurrentObservation>("get_nws_current_observation"));
+      } catch (err) {
+        console.error("get_nws_current_observation failed:", err);
+      }
     }
     refresh();
     listen("nws-current-observation-changed", refresh).then((fn) => {
@@ -165,7 +199,12 @@ function useSpcOutlook() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     async function refresh() {
-      setAreas(await invoke<SpcOutlookArea[]>("get_spc_outlook"));
+      try {
+        setAreas(await invoke<SpcOutlookArea[]>("get_spc_outlook"));
+      } catch (err) {
+        console.error("get_spc_outlook failed:", err);
+        setAreas([]);
+      }
     }
     refresh();
     listen("spc-outlook-changed", refresh).then((fn) => {

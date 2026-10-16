@@ -19,19 +19,33 @@ export function applyTheme(theme: string) {
 function AppearancePanel() {
   const [theme, setThemeState] = useState<Theme>("dark");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<{ theme: string }>("get_station_profile").then((p) => {
-      setThemeState((p.theme as Theme) ?? "dark");
-    });
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch --
+    // low severity (just keeps the "dark" default), but worth logging.
+    invoke<{ theme: string }>("get_station_profile")
+      .then((p) => {
+        setThemeState((p.theme as Theme) ?? "dark");
+      })
+      .catch((err) => console.error("get_station_profile failed:", err));
   }, []);
 
   async function choose(next: Theme) {
     setSaving(true);
     applyTheme(next); // instant feedback, don't wait on the round trip
+    // Real bug found live 2026-10-09: `finally` with no `catch` meant a
+    // failed save left the radio button showing the OLD selection even
+    // though the visible theme had already changed (applyTheme above) --
+    // a real state mismatch between what's shown and what's saved, with
+    // no explanation why.
     try {
       await invoke("set_theme", { theme: next });
+      setError(null);
       setThemeState(next);
+    } catch (err) {
+      console.error("set_theme failed:", err);
+      setError(String(err));
     } finally {
       setSaving(false);
     }
@@ -43,6 +57,7 @@ function AppearancePanel() {
         Display theme. Applies immediately and persists across restarts. Red is a real night-vision-preservation
         mode, not a cosmetic option — everything shifts to shades of red, never another hue.
       </p>
+      {error && <div className="panel-alerts-empty">{error}</div>}
       <div className="sync-peer-list">
         {THEMES.map((t) => (
           <div key={t.value} className="sync-peer-row">

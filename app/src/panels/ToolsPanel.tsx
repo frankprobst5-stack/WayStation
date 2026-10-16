@@ -47,8 +47,12 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
   const [rotator, setRotator] = useState<RotatorStatus | null>(null);
 
   useEffect(() => {
-    invoke<RigStatus>("get_rig_status").then(setRig);
-    invoke<RotatorStatus>("get_rotator_status").then(setRotator);
+    // Real bug found live 2026-10-09 (same file-wide sweep): no catch
+    // meant a failed invoke left rig/rotator null forever, and
+    // statusLabel(null) above renders that as a permanent "Loading..."
+    // label -- indistinguishable from a slow real fetch.
+    invoke<RigStatus>("get_rig_status").then(setRig).catch((err) => console.error("get_rig_status failed:", err));
+    invoke<RotatorStatus>("get_rotator_status").then(setRotator).catch((err) => console.error("get_rotator_status failed:", err));
   }, []);
 
   const rigStatus = statusLabel(rig);
@@ -129,10 +133,16 @@ function ToolsPanel() {
   const [rotatorEnabled, setRotatorEnabled] = useState(true);
 
   useEffect(() => {
-    invoke<{ rig_enabled: boolean; rotator_enabled: boolean }>("get_station_profile").then((p) => {
-      setRigEnabled(p.rig_enabled);
-      setRotatorEnabled(p.rotator_enabled);
-    });
+    // Real bug found live 2026-10-09 (same file-wide sweep): no .catch()
+    // -- fails open to both tabs shown (the existing true/true defaults)
+    // on failure, which is harmless, but still worth logging rather than
+    // an unhandled rejection.
+    invoke<{ rig_enabled: boolean; rotator_enabled: boolean }>("get_station_profile")
+      .then((p) => {
+        setRigEnabled(p.rig_enabled);
+        setRotatorEnabled(p.rotator_enabled);
+      })
+      .catch((err) => console.error("get_station_profile failed:", err));
   }, []);
 
   const radioControlVisible = rigEnabled || rotatorEnabled;
