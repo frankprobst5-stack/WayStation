@@ -493,6 +493,27 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-11-04 (Fixed a real deep-link config bug — fresh installs would never have
+  registered `waystation://` at all)** — Found while building Baneward's first real
+  production release: Tauri's bundler needs `plugins.deep-link.desktop.schemes` in
+  `tauri.conf.json`, not the flat `plugins.deep-link.schemes` this file had. Verified
+  against the actual installed `tauri-plugin-deep-link` v2.6.3 source (`src/config.rs`)
+  rather than guessing — its real `Config` struct requires the nested shape. With the old
+  shape, the Linux bundler silently registered zero schemes; confirmed directly by
+  inspecting the built `.desktop` file before the fix (no `MimeType` line) and after (now
+  correctly carries `MimeType=x-scheme-handler/waystation`). Real, honest nuance: this
+  machine's `waystation://` link has been working anyway, because the Rust-side runtime
+  registration (`DeepLinkExt::register`, called every app launch) writes its own
+  `~/.local/share/applications/waystation-handler.desktop` directly the first time the app
+  actually runs — a packaged `.deb`'s baked-in association was never what made it work
+  here. The real risk this fix closes: a **fresh install on a machine that has never run
+  WayStation once** (the actual 8-home-fleet deployment scenario this project exists for)
+  would have had no working `waystation://` link until the app was launched by hand at
+  least once first — exactly the kind of gap that matters for this project's real
+  audience. Rebuilt and verified the fix directly; not reinstalled over the existing
+  working release (no reason to disturb a real, currently-working install for a config
+  correctness fix with no visible symptom today).
+
 - **2026-09-27 (Fixed the app's own name, closed the last rebrand gap)** — A full
   case-sensitive sweep found "Waystation" (missing the internal capital) spelled that way
   almost everywhere: `productName`/window title in `tauri.conf.json`, the browser/app-window

@@ -35,7 +35,9 @@
   },
   "plugins": {
     "deep-link": {
-      "schemes": ["waystation"]
+      "desktop": {
+        "schemes": ["waystation"]
+      }
     }
   }
 }
