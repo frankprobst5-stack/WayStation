@@ -105,15 +105,41 @@ interface ScannerStatus {
   status: string;
 }
 
-function StatusChip({ label, state }: { label: string; state: "good" | "bad" | "warn" | "off" }) {
-  const text = state === "good" ? "Online" : state === "bad" ? "Offline" : state === "warn" ? "Degraded" : "Unknown";
+// resource_status::ResourceChip / ResourceStatus
+interface ResourceChip {
+  level: "good" | "low" | "critical" | "no_data";
+  detail: string;
+}
+interface ResourceStatus {
+  power: ResourceChip;
+  water: ResourceChip;
+  food: ResourceChip;
+}
+
+function StatusChip({
+  label,
+  state,
+  text,
+  title,
+}: {
+  label: string;
+  state: "good" | "bad" | "warn" | "off";
+  /** Overrides the default Online/Offline/Degraded/Unknown wording -- used
+      by the Critical Resource chips below, where "Low"/"Critical" reads
+      correctly and "Degraded" doesn't. */
+  text?: string;
+  /** A real, specific reason shown on hover -- e.g. "38% battery" -- so the
+      chip is never just an unexplained color. */
+  title?: string;
+}) {
+  const resolvedText = text ?? (state === "good" ? "Online" : state === "bad" ? "Offline" : state === "warn" ? "Degraded" : "Unknown");
   return (
-    <div className="dash-status-chip">
+    <div className="dash-status-chip" title={title}>
       <div className="dash-status-chip-top">
         <span className="dash-status-chip-label">{label}</span>
         <span className={`dash-dot dash-dot-${state}`} />
       </div>
-      <span className={`dash-status-chip-value dash-status-chip-value-${state}`}>{text}</span>
+      <span className={`dash-status-chip-value dash-status-chip-value-${state}`}>{resolvedText}</span>
     </div>
   );
 }
@@ -138,6 +164,7 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
   const [localWeather, setLocalWeather] = useState<LocalWeatherObservation | null>(null);
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [scanner, setScanner] = useState<ScannerStatus | null>(null);
+  const [resources, setResources] = useState<ResourceStatus | null>(null);
 
   useEffect(() => {
     // Real bug found live 2026-10-09 (same file-wide sweep across this
@@ -164,12 +191,21 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
       invoke<ScannerStatus>("get_citadel_scanner_status")
         .then(setScanner)
         .catch(() => setScanner(null));
+    // Same relaxed cadence as the scanner poll -- Power/Water/Food are
+    // real but slow-moving signals (a battery's state of charge or a
+    // pantry's stock level doesn't need a 3s poll like rig/rotator do),
+    // and each refresh is three real HTTP round-trips to Citadel.
+    const refreshResources = () =>
+      invoke<ResourceStatus>("get_resource_status")
+        .then(setResources)
+        .catch(() => setResources(null));
 
     refreshIncident();
     refreshActivity();
     refreshRig();
     refreshRotator();
     refreshScanner();
+    refreshResources();
     invoke<SystemHealthSnapshot | null>("get_system_health").then(setHealth).catch((err) => console.error("get_system_health failed:", err));
     invoke<SpaceWeather>("get_space_weather").then(setSpaceWeather).catch((err) => console.error("get_space_weather failed:", err));
     invoke<LocalWeatherObservation>("get_local_weather_observation")
@@ -181,6 +217,7 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
     const rigTimer = setInterval(refreshRig, 3_000);
     const rotatorTimer = setInterval(refreshRotator, 3_000);
     const scannerTimer = setInterval(refreshScanner, 20_000);
+    const resourcesTimer = setInterval(refreshResources, 60_000);
 
     let unlistenHealth: (() => void) | undefined;
     let unlistenSpaceWeather: (() => void) | undefined;
@@ -203,6 +240,7 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
       clearInterval(rigTimer);
       clearInterval(rotatorTimer);
       clearInterval(scannerTimer);
+      clearInterval(resourcesTimer);
       unlistenHealth?.();
       unlistenSpaceWeather?.();
       unlistenLocalWeather?.();
@@ -214,6 +252,11 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
     connectivity?.overall === "online" ? "good" : connectivity?.overall === "degraded" ? "warn" : connectivity?.overall === "rf_only" ? "bad" : "off";
   const scannerState: "good" | "bad" | "warn" | "off" =
     scanner?.status === "listening" || scanner?.status === "ok" ? "good" : scanner?.status === "error" ? "bad" : "off";
+
+  const resourceChipState = (level: ResourceChip["level"] | undefined): "good" | "bad" | "warn" | "off" =>
+    level === "good" ? "good" : level === "low" ? "warn" : level === "critical" ? "bad" : "off";
+  const resourceChipText = (level: ResourceChip["level"] | undefined): string =>
+    level === "good" ? "Good" : level === "low" ? "Low" : level === "critical" ? "Critical" : "No data";
 
   const bandConditions: BandCondition[] = spaceWeather?.band_conditions ? JSON.parse(spaceWeather.band_conditions) : [];
 
@@ -233,6 +276,31 @@ function DashboardPage({ onNavigate }: { onNavigate: (tab: PanelCategory) => voi
             <StatusChip label="Mesh" state={healthState(source("meshtastic")?.status)} />
             <StatusChip label="Scanner" state={scannerState} />
             <StatusChip label="Internet" state={internetState} />
+          </div>
+        </div>
+        <div className="dash-panel">
+          <div className="dash-panel-head">
+            <span className="dash-panel-title">Critical Resources</span>
+          </div>
+          <div className="dash-status-strip">
+            <StatusChip
+              label="Power"
+              state={resourceChipState(resources?.power.level)}
+              text={resourceChipText(resources?.power.level)}
+              title={resources?.power.detail}
+            />
+            <StatusChip
+              label="Water"
+              state={resourceChipState(resources?.water.level)}
+              text={resourceChipText(resources?.water.level)}
+              title={resources?.water.detail}
+            />
+            <StatusChip
+              label="Food"
+              state={resourceChipState(resources?.food.level)}
+              text={resourceChipText(resources?.food.level)}
+              title={resources?.food.detail}
+            />
           </div>
         </div>
         <div className="dash-panel">

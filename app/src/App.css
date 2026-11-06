@@ -3322,7 +3322,7 @@ select {
 /* Row 1 -- operational status */
 .dash-row-status {
   display: grid;
-  grid-template-columns: 1fr 220px;
+  grid-template-columns: 1fr 1fr 220px;
   gap: 0.6rem;
   flex-shrink: 0;
 }
@@ -3890,6 +3890,16 @@ select {
   color: var(--text-muted);
   font-size: 0.68rem;
   line-height: 1.5;
+}
+
+.scan-alert-banner {
+  background: var(--red);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.25rem;
+  margin-bottom: 0.4rem;
 }
 
 .scan-result {

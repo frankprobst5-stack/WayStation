@@ -12,6 +12,7 @@ mod dispatch;
 mod dxcluster;
 mod flight_tracking;
 mod js8call;
+mod keyword_alerts;
 mod kiwix_search;
 mod maidenhead;
 mod mesh;
@@ -23,6 +24,7 @@ mod pskreporter;
 mod readiness;
 mod repeaterbook;
 mod required_software;
+mod resource_status;
 mod rig;
 mod rotator;
 mod satellite;
@@ -219,6 +221,8 @@ pub fn run() {
             net_sync::sync_with_peer,
             auto_sync::get_auto_sync_history,
             citadel_scanner::get_citadel_scanner_status,
+            resource_status::get_resource_status,
+            keyword_alerts::check_transcript_for_alerts,
             citadel_scanner::get_citadel_scanner_config,
             citadel_scanner::save_citadel_scanner_config,
             citadel_scanner::list_citadel_scanner_profiles,

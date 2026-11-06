@@ -158,6 +158,10 @@ function ScannerPanel() {
   const [transcribing, setTranscribing] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<Record<string, string>>({});
   const [transcribeErrors, setTranscribeErrors] = useState<Record<string, string>>({});
+  // Keyword-triggered alert banners -- real, deterministic, local-only (see
+  // keyword_alerts.rs). Keyed by filename so each transcript's own banner
+  // stays attached to it, same pattern as transcripts/transcribeErrors above.
+  const [transcriptAlerts, setTranscriptAlerts] = useState<Record<string, string[]>>({});
   const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
   const [incidentPicks, setIncidentPicks] = useState<Record<string, string>>({});
   const [loggedFilenames, setLoggedFilenames] = useState<Set<string>>(new Set());
@@ -201,6 +205,14 @@ function ScannerPanel() {
         delete next[filename];
         return next;
       });
+      // Local, deterministic keyword check -- never depends on Citadel or
+      // an AI model being reachable, so it still fires if either is down.
+      try {
+        const matches = await invoke<string[]>("check_transcript_for_alerts", { text });
+        setTranscriptAlerts((prev) => ({ ...prev, [filename]: matches }));
+      } catch (err) {
+        console.error("check_transcript_for_alerts failed:", err);
+      }
     } catch (err) {
       setTranscribeErrors((prev) => ({ ...prev, [filename]: String(err) }));
     } finally {
@@ -615,6 +627,11 @@ function ScannerPanel() {
                       <td>
                         {transcripts[r.filename] ? (
                           <div>
+                            {transcriptAlerts[r.filename] && transcriptAlerts[r.filename].length > 0 && (
+                              <div className="scan-alert-banner">
+                                ⚠ Keyword alert: {transcriptAlerts[r.filename].join(", ")}
+                              </div>
+                            )}
                             <div>{transcripts[r.filename]}</div>
                             {loggedFilenames.has(r.filename) ? (
                               <span className="scan-hint">Logged to timeline.</span>
