@@ -505,6 +505,15 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-11-07 (Stage 8 release installed and confirmed live)** — A fresh `.deb` carrying
+  Critical Resource Status chips and keyword-triggered alert banners was built, installed
+  for real via `dpkg`, and launched. This was also the first time the real installed
+  `/usr/bin/waystation` binary (not the dev build) had ever been launched on this
+  machine — its own runtime deep-link registration (the 2026-11-04 fix below) correctly
+  self-corrected `~/.local/share/applications/waystation-handler.desktop` from the old raw
+  build path to `/usr/bin/waystation`, confirmed by reading the file immediately after,
+  same self-healing behavior already proven for Baneward. Frank confirmed on his own
+  physical desktop: "yes both look great."
 - **2026-11-04 (Fixed a real deep-link config bug — fresh installs would never have
   registered `waystation://` at all)** — Found while building Baneward's first real
   production release: Tauri's bundler needs `plugins.deep-link.desktop.schemes` in
