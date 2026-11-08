@@ -35,6 +35,7 @@ mod system_health;
 mod transcription;
 mod transport;
 mod weather_station;
+mod wsp2;
 
 use db::Db;
 use std::sync::Mutex;
@@ -262,6 +263,8 @@ pub fn run() {
             mesh::send_mesh_position,
             mesh::request_mesh_position,
             mesh::reconnect_mesh,
+            mesh::sync_manifest_over_mesh,
+            mesh::get_received_mesh_manifests,
             rig::get_rig_status,
             rig::set_rig_frequency,
             rig::set_rig_mode,

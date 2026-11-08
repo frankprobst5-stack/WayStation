@@ -54,6 +54,13 @@ interface MeshStatus {
   target: string;
 }
 
+interface ReceivedManifestSummary {
+  origin_callsign: string | null;
+  generated_at: number;
+  entry_count: number;
+  received_at: number;
+}
+
 const BROADCAST_NODE = 4294967295; // 0xFFFFFFFF
 const CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7];
 const STATUS_POLL_MS = 5000;
@@ -109,6 +116,9 @@ function MeshPanel() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [receivedManifests, setReceivedManifests] = useState<ReceivedManifestSummary[]>([]);
+  const [syncingManifest, setSyncingManifest] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
   async function refreshNodes() {
     try {
@@ -123,6 +133,14 @@ function MeshPanel() {
       setMessages(await invoke<MeshMessage[]>("get_mesh_messages"));
     } catch (err) {
       console.error("get_mesh_messages failed:", err);
+    }
+  }
+
+  async function refreshReceivedManifests() {
+    try {
+      setReceivedManifests(await invoke<ReceivedManifestSummary[]>("get_received_mesh_manifests"));
+    } catch (err) {
+      console.error("get_received_mesh_manifests failed:", err);
     }
   }
 
@@ -143,11 +161,13 @@ function MeshPanel() {
     refreshNodes();
     refreshMessages();
     refreshStatus();
+    refreshReceivedManifests();
 
     const unlisteners: (() => void)[] = [];
     listen("mesh-nodes-changed", refreshNodes).then((fn) => unlisteners.push(fn));
     listen("mesh-messages-changed", refreshMessages).then((fn) => unlisteners.push(fn));
     listen("mesh-config-complete", refreshNodes).then((fn) => unlisteners.push(fn));
+    listen("mesh-manifest-received", refreshReceivedManifests).then((fn) => unlisteners.push(fn));
 
     const interval = setInterval(refreshStatus, STATUS_POLL_MS);
     return () => {
@@ -246,6 +266,26 @@ function MeshPanel() {
       await invoke("request_mesh_position", { toNode });
     } catch (err) {
       setActionError(String(err));
+    }
+  }
+
+  async function syncManifest() {
+    setSyncingManifest(true);
+    setSyncStatus(null);
+    try {
+      // First real wiring of WSP/2 into a live send path: exports this
+      // station's own manifest, encodes it compactly, fragments it to
+      // the real over-the-air ceiling, and sends every fragment as its
+      // own PrivateApp packet -- see WSP-2.md. This only sends; it
+      // doesn't yet request the objects a peer's own reply would say
+      // this station is missing (see mesh.rs's own doc comment on
+      // sync_manifest_over_mesh for the honest, named scope boundary).
+      const fragmentCount = await invoke<number>("sync_manifest_over_mesh", { toNode });
+      setSyncStatus(`Sent manifest in ${fragmentCount} fragment${fragmentCount === 1 ? "" : "s"}.`);
+    } catch (err) {
+      setSyncStatus(`Failed: ${String(err)}`);
+    } finally {
+      setSyncingManifest(false);
     }
   }
 
@@ -429,8 +469,19 @@ function MeshPanel() {
                 <IconTrash className="mesh-inline-icon" />
                 Clear Chat
               </button>
+              <button
+                type="button"
+                className="mesh-pill mesh-action-button"
+                onClick={syncManifest}
+                disabled={!status?.connected || syncingManifest}
+                title="Send this station's manifest over mesh (WSP/2, see WSP-2.md)"
+              >
+                <IconRefresh className="mesh-inline-icon" />
+                {syncingManifest ? "Syncing..." : "Sync Manifest"}
+              </button>
             </div>
             {actionError && <div className="panel-alerts-empty">{actionError}</div>}
+            {syncStatus && <div className="field-hint">{syncStatus}</div>}
           </div>
         </div>
 
@@ -572,6 +623,31 @@ function MeshPanel() {
                             {formatLatLon(p.node.latitude, p.node.longitude)}
                           </span>
                         )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mesh-rail-section">
+            <div className="sw-label">Received Manifests (WSP/2)</div>
+            {receivedManifests.length === 0 ? (
+              <div className="panel-alerts-empty">None received yet.</div>
+            ) : (
+              <div className="mesh-participant-list">
+                {[...receivedManifests].reverse().map((m, i) => (
+                  <div key={`${m.received_at}-${i}`} className="mesh-participant-row">
+                    <div className="mesh-participant-body">
+                      <div className="mesh-participant-name-row">
+                        <span className="resource-label">{m.origin_callsign ?? "(unknown callsign)"}</span>
+                      </div>
+                      <div className="resource-tokens">
+                        <span className="resource-chip">
+                          {m.entry_count} entr{m.entry_count === 1 ? "y" : "ies"}
+                        </span>
+                        <span className="resource-chip">{relativeTime(m.received_at)}</span>
                       </div>
                     </div>
                   </div>

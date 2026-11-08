@@ -20,6 +20,8 @@ On-demand sync ("Sync via Network," one click, one station) is always available 
 
 **Trust model limits, same as signing:** shared-secret-per-known-station, not a PKI. Adequate for a small, mutually-known circle. The nonce-signature handshake has no server-issued challenge (the client picks its own nonce) — fine for this trust model, but worth naming: it doesn't defend against a sophisticated replay attack the way a server-issued challenge would. Real work if this protocol is ever exposed beyond a trusted LAN.
 
+**Candidate direction proposed, 2026-11-08, not yet design-reviewed against this spec's real constraints or `mesh.rs`:** a persistent per-node-ID bitmask of the last N received sequence numbers, dropping anything below the window floor instantly, with no reliance on wall-clock time (grid-down clock drift makes wall-clock replay checks unreliable here) — plus a coarse monotonic epoch that gets a fresh cryptographic handshake whenever a station reconnects, to cover reboots or long absences the sliding window alone can't. Reasonable shape on paper, but it needs a real pass against this protocol's existing `Hello`/nonce handshake above before being treated as settled — this is ownership item 26 in `citadel-ecosystem/MASTER_ROADMAP.md`'s Stage 10.
+
 ## The envelope
 
 Every file this protocol produces is a `WspEnvelope`, never a bare array. Two variants, distinguished by a `wsp_kind` tag:

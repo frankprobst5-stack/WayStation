@@ -243,8 +243,50 @@ Citadel Ecosystem Master Architecture doc, so it isn't just written once and for
 Reconciled 2026-09-03 against a longer external planning list Frank was carrying separately, item by item against the real codebase rather than taken at face value — some items turned out to already exist elsewhere (WSP/1's own "what's not in WSP/1" section already named three of these), one turned out to already be fully built (offline map tiles, via PMTiles, not the `.mbtiles` the original list assumed), and a few were dropped or narrowed after discussion. Organized by area, not by priority — flight tracking, weather, and the scanner subsystem are the operator's stated top priority given a real high-disaster-risk location, flagged individually below.
 
 **Transport & Networking**
-- **WSP/2 compact binary serialization** `[PLANNED]` — already named as deliberately deferred in [WSP-1.md](WSP-1.md)'s "What's not in WSP/1"; today's JSON envelope is fine until a real bandwidth-constrained transport exists to force the issue.
-- **Packet fragmentation/reassembly + sliding-window ack** `[PLANNED]` — same WSP-1.md deferral, same reason.
+- **WSP/2 compact binary serialization** `[PLANNED]` → **manifest codec shipped and wired
+  into a live mesh send/receive path, 2026-11-08.** See [WSP-2.md](WSP-2.md) for the full
+  design and real verification detail. Real grounding, not assumed: checked the
+  `meshtastic` crate's own generated protobuf directly and found `Constants::DataPayloadLen
+  = 233` bytes — the real over-the-air ceiling, meaningfully smaller than `mesh.rs`'s own
+  `MAX_PACKET_LEN = 512` (which is only the local TCP client-API's resync threshold, not an
+  RF constraint; surfaced a real, separate, pre-existing gap along the way — nothing checks
+  outbound mesh messages against the real 233-byte ceiling today). New `wsp2.rs`: a
+  hand-rolled binary manifest encoder/decoder (raw 16-byte uuids and 32-byte hashes instead
+  of WSP/1's hex/dashed-string forms, `updated_at` dropped since it's diagnostic-only and
+  unused by `uuids_needed_from`) plus a content-agnostic fragmenter/reassembler sized to the
+  real 233-byte ceiling. 9 real unit tests, including one that measures the actual
+  compression ratio against real `serde_json`-serialized WSP/1 output rather than
+  estimating it by eye: **121 bytes binary vs. 507 bytes JSON for the same 2-entry
+  manifest, a measured 4.2x reduction.** Caught and fixed two real bugs during this work,
+  both via the test suite itself, not left in: a hand-typed fixture SHA256 one hex digit
+  short, and leftover scratch-module debris an incomplete `git checkout` left behind.
+  **Wired into `mesh.rs`, same day**: `sync_manifest_over_mesh` (send — exports this
+  station's real manifest, encodes, fragments, sends every fragment as a `MeshPacket`) and
+  a new `handle_mesh_packet` branch on `PortNum::PrivateApp` (receive — reassembles,
+  decodes, appends to a bounded history, emits `mesh-manifest-received`). Deliberately
+  bypasses `transport.rs`'s `Transport` trait, matching `net_sync.rs`'s own precedent (the
+  other real sync transport isn't built on that abstraction either — different real shape:
+  protocol reconciliation, not a fire-and-forget operator message). `MeshPanel.tsx` gained a
+  "Sync Manifest" quick action and a "Received Manifests (WSP/2)" list. Verified against
+  this machine's actually-running `meshtasticd`, not just compiled: 162 unit tests passing,
+  3 live-hardware tests (including a new one) run with `--ignored` against the real daemon,
+  all passing — real fragments over a real socket. **Still not done, named honestly**: the
+  `Objects` envelope (message/marker bodies) has no compact encoding yet; a received
+  manifest is decoded and shown but doesn't trigger the real `uuids_needed_from`/
+  `export_objects`/`merge_incoming` follow-up — WSP/1 syncing *over* mesh, not just a
+  manifest *traveling* over mesh, is the next real increment; and everything proven so far
+  is one real node's send+decode logic — a second real node is still needed to confirm an
+  actual station-to-station hand-off.
+- **Packet fragmentation/reassembly + sliding-window ack** `[PLANNED]` → **fragmentation
+  done and wired in** (`wsp2.rs`'s `fragment`/`Reassembler`, real-tested including
+  out-of-order delivery and a `missing_fragments` query; live in `mesh.rs`'s send/receive
+  path as of the entry above). **Sliding-window ack deliberately reuses Meshtastic's own
+  existing per-packet ACK** (`want_ack`/`RoutingApp`, already wired into `handle_mesh_packet`
+  → `db::set_mesh_message_status`) rather than building a parallel ack protocol — same
+  "orchestrate, don't reimplement" reasoning this app already applies to SGP4 and
+  Meshtastic's own protobuf types. `missing_fragments` itself is tested but not yet called
+  from `mesh.rs` — real, named follow-on if firmware-level retry alone proves insufficient.
+  See `WSP-2.md`'s "Acknowledgement" section.
 - ~~**mDNS/DNS-SD local peer discovery**~~ — ✅ done 2026-09-03, see that day's changelog. `discovery.rs`: advertises this station as `_waystation._tcp.local.` (callsign in a TXT record, no live port behind it yet — file exchange is still the only real sync transport), browses for others, surfaces them read-only in `SyncPanel.tsx`. **Discovery only, never automatic sync**, per the second non-negotiable principle above — nothing discovered is clickable to sync, moving data still always means Export/Import.
 - ~~**Automated background sync loop**~~ — ✅ done 2026-09-04, see that day's changelog and [WSP-1.md](WSP-1.md)'s Transports section. `auto_sync.rs` polls every 5 minutes; a peer only ever becomes a real connect target with both an explicit per-peer `auto_sync` opt-in (off by default, even for an already-trusted peer) *and* current presence in mDNS discovery. On-demand "Sync via Network" is unaffected and still available regardless.
 - **WSP/1 sync (manifest/diff/merge) over mesh as its own transport** `[DISCOVERY]`, added
@@ -258,9 +300,13 @@ Reconciled 2026-09-03 against a longer external planning list Frank was carrying
   beyond Muster: it's also the real prerequisite for this document's own "TTL / multi-hop
   forwarding" gap already named in WSP-1.md's "What's not in WSP/1" section — a station-to-
   station mesh sync transport is a reasonable first step toward that, not a separate
-  problem. Not yet scoped into real tasks; needs its own design pass (LoRa/Meshtastic's real
-  payload-size ceiling makes this land close to WSP/2's compact-encoding work above, likely
-  a shared prerequisite rather than two independent efforts).
+  problem. **Real prerequisite now proven, 2026-11-08** — see the WSP/2 entry above: a
+  manifest can genuinely travel over mesh (encoded, fragmented, sent, received, reassembled,
+  decoded), verified against real hardware. **Still not this item itself**: nothing calls
+  `uuids_needed_from`/`export_objects`/`merge_incoming` on a received manifest yet — a
+  manifest arriving over mesh today is decoded and shown, not acted on. The real remaining
+  task is porting `net_sync.rs`'s bidirectional reconciliation loop onto this fragmented,
+  per-port mesh connection instead of a raw TCP socket — scoped, not started.
 
 **Provenance & Trust**
 - ~~**Cleartext HMAC signing**~~ — ✅ done 2026-09-03, see [WSP-1.md](WSP-1.md)'s "Signing" section and that day's changelog entry. Shared-secret-per-known-station model (not a PKI), HMAC-SHA256 over the Objects envelope, verification surfaced (Verified/Unsigned/UnknownSigner/Invalid) but not enforced — the operator decides what to do with an unverified import, same as an unresolved sync conflict. Secret rotation and per-object (rather than per-envelope) signing are real remaining gaps, noted in WSP-1.md rather than silently left out.
@@ -421,8 +467,8 @@ Reconciled 2026-09-03 against a longer external planning list Frank was carrying
   XTOC itself actually is, rather than bolted onto a native-desktop codebase never designed
   for it. Interop between the two goes over WSP/1 (see the new Transport & Networking item
   above for the real, honest state of mesh-as-a-sync-transport).
-- **ATAK/CoT (Cursor-on-Target) interoperability** `[PLANNED]` — confirmed absent (no ATAK/CoT/KML handling in the codebase). This is about reach, not features: ATAK already has wide adoption in the same emergency-response/SAR/prepper world WayStation targets, and CoT support means exchanging position/situational data with a tool people may already have installed, rather than asking them to replace it. **Ownership not yet decided, 2026-09-15**: this may end up living in Muster instead (lighter-weight, browser-native, arguably a more natural home for a mapping/interop feature aimed at field use) — not resolved either way yet.
-- **Reticulum/RNode/MeshChat interoperability** `[DISCOVERY]` — confirmed absent. A separate, real, actively-used cryptographic mesh stack XTOC bridges to that WayStation's own Meshtastic-based mesh (`mesh.rs`) doesn't talk to. Genuine open question, not a clear yes: worth deciding whether bridging to a second mesh ecosystem is worth the effort against fragmenting focus away from WayStation's own mesh + WSP sync. **Ownership not yet decided, 2026-09-15**: same open question as ATAK/CoT above — may belong to Muster instead of here.
+- **ATAK/CoT (Cursor-on-Target) interoperability** `[PLANNED]` — confirmed absent (no ATAK/CoT/KML handling in the codebase). This is about reach, not features: ATAK already has wide adoption in the same emergency-response/SAR/prepper world WayStation targets, and CoT support means exchanging position/situational data with a tool people may already have installed, rather than asking them to replace it. **Ownership decided, 2026-11-08: stays here.** The real split: WayStation owns serialization/transport/encryption/routing end to end (raw binary codecs, WSP/2, cryptographic validity, and now CoT translation as another wire protocol it speaks); Muster exclusively consumes already-decrypted, deterministic JSON state and exists purely as the human-facing coordination workspace. Translating CoT XML is a transport-layer concern, not a coordination-workflow one, so it belongs with WSP/1/2 rather than with Muster.
+- **Reticulum/RNode/MeshChat interoperability** `[DISCOVERY]` — confirmed absent. A separate, real, actively-used cryptographic mesh stack XTOC bridges to that WayStation's own Meshtastic-based mesh (`mesh.rs`) doesn't talk to. Genuine open question, not a clear yes: worth deciding whether bridging to a second mesh ecosystem is worth the effort against fragmenting focus away from WayStation's own mesh + WSP sync. **Ownership decided, 2026-11-08: stays here**, same reasoning as ATAK/CoT above — bridging to another mesh/transport stack is WayStation's job; Muster only ever sees the decrypted state that comes out the other side.
 - **Video ISR / drone flight-planning workflows** `[DISCOVERY]` — confirmed absent entirely. A much bigger scope bite than the other four items here, closer to its own subsystem (flight planning + live video ingestion) than a feature add. Worth knowing XTOC has it, not worth chasing unless it comes up as a real, repeated ask.
 
 **"XCAST" community bulletin — WayStation's half (broadcast), 2026-09-15.** Frank's idea, not an XTOC/MKME feature (checked). Citadel authors and displays a simple, public, no-login bulletin (meal times, live charging stations, announcements) for a relief site or community hub during grid-down — see Citadel's own ROADMAP.md entry for that half and the full framing. WayStation's job is getting that content *out*, per the standing rule that all comms/broadcast distribution stays here rather than splitting across a Citadel page. This serves a genuinely different audience than everything else in this list: not a trained operator moving structured SITREPs, just a visitor who needs a plain answer with no app, login, or training. Real delivery options, each reaching a different kind of visitor, none scoped into buildable steps yet:

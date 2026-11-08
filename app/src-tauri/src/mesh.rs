@@ -31,6 +31,8 @@
 
 use crate::connectivity::{self, Status, Via};
 use crate::db::{self, Db};
+use crate::sync;
+use crate::wsp2;
 use chrono::Utc;
 use meshtastic::protobufs::{from_radio, mesh_packet, routing, to_radio, Data, FromRadio, MeshPacket, PortNum, Position, ToRadio};
 use meshtastic::Message;
@@ -72,7 +74,32 @@ pub struct MeshState {
     pub target: Mutex<Option<String>>,
     /// Set by `reconnect_mesh` to cut the reconnect wait short.
     pub reconnect_requested: AtomicBool,
+    /// Tracks in-progress WSP/2 manifest fragments arriving on
+    /// `PortNum::PrivateApp` across however many packets they take to
+    /// arrive -- see `wsp2.rs`. One reassembler shared across every peer,
+    /// since each in-flight manifest already has its own `msg_id`.
+    pub manifest_reassembler: Mutex<wsp2::Reassembler>,
+    /// A bounded history of manifests fully reassembled and decoded from
+    /// the mesh -- real received data, not acted on yet (see `mesh_sync`
+    /// module doc below: this proves send/fragment/receive/reassemble/
+    /// decode works over live mesh, not that the full WSP/1 object-request
+    /// follow-up runs automatically).
+    pub received_manifests: Mutex<Vec<ReceivedManifestSummary>>,
 }
+
+/// What a peer's reassembled, decoded WSP/2 manifest looks like once
+/// surfaced to the frontend -- the entries themselves aren't kept here
+/// (no object-level reconciliation follow-up exists yet, see module doc),
+/// just enough to show "a manifest arrived, from whom, how much of it."
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReceivedManifestSummary {
+    pub origin_callsign: Option<String>,
+    pub generated_at: i64,
+    pub entry_count: usize,
+    pub received_at: i64,
+}
+
+const RECEIVED_MANIFEST_HISTORY_CAP: usize = 20;
 
 impl MeshState {
     pub fn new() -> Self {
@@ -81,6 +108,8 @@ impl MeshState {
             my_node_num: Mutex::new(None),
             target: Mutex::new(None),
             reconnect_requested: AtomicBool::new(false),
+            manifest_reassembler: Mutex::new(wsp2::Reassembler::new()),
+            received_manifests: Mutex::new(Vec::new()),
         }
     }
 }
@@ -247,6 +276,51 @@ fn handle_mesh_packet(app: &AppHandle, packet: MeshPacket) {
                     drop(conn);
                     let _ = app.emit("mesh-messages-changed", ());
                 }
+            }
+        } else if data.portnum == PortNum::PrivateApp as i32 {
+            // A WSP/2 fragment (see wsp2.rs) -- a dedicated port, not
+            // TextMessageApp, both because Meshtastic's own firmware
+            // reserves portnums >= 256 for exactly this ("Private
+            // applications should use portnums >= 256... PRIVATE_APP"),
+            // and because these are raw binary bytes, never meant to
+            // round-trip through handle_mesh_packet's String::from_utf8
+            // path the way a chat message or a WSPIN marker pin does.
+            let mesh_state = app.state::<MeshState>();
+            let mut reassembler = mesh_state.manifest_reassembler.lock().expect("mesh state mutex poisoned");
+            match reassembler.add_fragment(&data.payload) {
+                Ok(Some(complete)) => {
+                    drop(reassembler);
+                    match wsp2::decode_manifest(&complete) {
+                        Ok((origin_callsign, generated_at, entries)) => {
+                            let summary = ReceivedManifestSummary {
+                                origin_callsign,
+                                generated_at,
+                                entry_count: entries.len(),
+                                received_at: Utc::now().timestamp(),
+                            };
+                            let mut history = mesh_state.received_manifests.lock().expect("mesh state mutex poisoned");
+                            history.push(summary);
+                            // Real, bounded history -- this isn't the
+                            // object store, just a recent-activity log
+                            // for the frontend; see the struct's own doc.
+                            while history.len() > RECEIVED_MANIFEST_HISTORY_CAP {
+                                history.remove(0);
+                            }
+                            drop(history);
+                            let _ = app.emit("mesh-manifest-received", ());
+                        }
+                        Err(e) => {
+                            // A real, honest failure -- a fragment set
+                            // reassembled cleanly but didn't decode as a
+                            // valid WSP/2 manifest (version mismatch,
+                            // corruption, or something else entirely on
+                            // this port). Logged, not silently dropped.
+                            eprintln!("wsp2: failed to decode a reassembled mesh manifest: {e}");
+                        }
+                    }
+                }
+                Ok(None) => {} // still waiting on more fragments for this msg_id
+                Err(e) => eprintln!("wsp2: failed to add a received mesh fragment: {e}"),
             }
         }
         // Other portnums on decoded packets (telemetry, admin) aren't
@@ -478,6 +552,71 @@ pub fn send_mesh_text(
     Ok(())
 }
 
+/// First real wiring of WSP/2 into a live send path: exports this
+/// station's own manifest (`sync::export_manifest`, the same function
+/// `net_sync.rs`'s TCP transport uses), encodes it in WSP/2's compact
+/// binary form, fragments it to the real over-the-air ceiling, and sends
+/// every fragment as its own `PrivateApp` packet. Deliberately bypasses
+/// the `Transport` trait in `transport.rs` -- that abstraction is for
+/// fire-and-forget ICS messages/markers (`OutboundEnvelope`/`Payload`), a
+/// different real shape than protocol-level sync reconciliation.
+/// `net_sync.rs`, the other real sync transport, makes the same choice:
+/// it doesn't use `Transport` either, it's its own direct implementation.
+///
+/// What this does NOT do yet, named honestly rather than silently
+/// assumed: request the objects the manifest says are needed back from
+/// the peer (`uuids_needed_from`/`export_objects`/`merge_incoming`) --
+/// this proves a manifest can be sent, fragmented, received, reassembled,
+/// and decoded correctly over live mesh; the full bidirectional
+/// reconciliation loop `net_sync.rs` already runs over TCP is a separate,
+/// larger follow-on. Retransmission of a specific missing fragment also
+/// isn't driven automatically here -- `want_ack: true` on every fragment
+/// gets each one the firmware's own real per-packet retry/ack behavior
+/// (see WSP-2.md's "Acknowledgement" section), which is the same
+/// reliability mechanism `send_mesh_text` already relies on today.
+#[tauri::command]
+pub fn sync_manifest_over_mesh(mesh_state: State<MeshState>, db: State<Db>, to_node: Option<i64>) -> Result<usize, String> {
+    let (callsign, entries) = {
+        let conn = db.0.lock().expect("db mutex poisoned");
+        (db::station_profile(&conn).callsign, sync::export_manifest(&conn))
+    };
+    let encoded = wsp2::encode_manifest(callsign.as_deref(), Utc::now().timestamp(), &entries)
+        .map_err(|e| format!("failed to encode manifest: {e}"))?;
+    let msg_id = generate_config_id();
+    let frames = wsp2::fragment(&encoded, msg_id).map_err(|e| format!("failed to fragment manifest: {e}"))?;
+
+    let to = to_node.map(|n| n as u32).unwrap_or(BROADCAST_NODE);
+    let my_node_num = mesh_state.my_node_num.lock().expect("mesh state mutex poisoned").unwrap_or(0);
+    let mut guard = mesh_state.stream.lock().expect("mesh state mutex poisoned");
+    let stream = guard.as_mut().ok_or("not connected to a mesh node")?;
+    for frame in &frames {
+        let packet = MeshPacket {
+            from: my_node_num,
+            to,
+            id: generate_config_id(),
+            channel: 0,
+            want_ack: true,
+            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
+                portnum: PortNum::PrivateApp as i32,
+                payload: frame.clone(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let to_radio = ToRadio { payload_variant: Some(to_radio::PayloadVariant::Packet(packet)) };
+        write_to_radio(stream, &to_radio).map_err(|e| e.to_string())?;
+    }
+    Ok(frames.len())
+}
+
+/// The recent-activity log `handle_mesh_packet` appends to on every fully
+/// reassembled manifest -- see `ReceivedManifestSummary`'s own doc for
+/// what this deliberately is and isn't.
+#[tauri::command]
+pub fn get_received_mesh_manifests(mesh_state: State<MeshState>) -> Vec<ReceivedManifestSummary> {
+    mesh_state.received_manifests.lock().expect("mesh state mutex poisoned").clone()
+}
+
 /// Broadcasts this station's fixed QTH, derived from the grid square in
 /// Settings rather than a GPS fix -- correct for the common case here of a
 /// stationary home/EOC node with no GPS attached. First cut of position
@@ -626,5 +765,43 @@ mod tests {
         };
         let to_radio = ToRadio { payload_variant: Some(to_radio::PayloadVariant::Packet(packet)) };
         write_to_radio(&mut stream, &to_radio).expect("write_to_radio failed sending a real text packet to the live daemon");
+    }
+
+    #[test]
+    #[ignore]
+    fn sending_a_real_wsp2_manifest_fragment_on_private_app_does_not_error() {
+        // Same honest scope as the broadcast-text test above: this
+        // exercises wsp2::fragment's real output going out over a real
+        // socket on PortNum::PrivateApp, not sync_manifest_over_mesh
+        // itself (which needs a full AppHandle/Db state this test can't
+        // construct -- the same category of gap this module's own doc
+        // comment already names for AppHandle-coupled code).
+        let mut stream = connect();
+        let entries = vec![crate::sync::ManifestEntry {
+            uuid: uuid::Uuid::new_v4().to_string(),
+            kind: crate::sync::ObjectKind::Marker,
+            revision: 1,
+            updated_at: String::new(),
+            content_hash: None,
+        }];
+        let encoded = wsp2::encode_manifest(Some("WAYSTATION-TEST"), Utc::now().timestamp(), &entries).expect("encode a real manifest");
+        let frames = wsp2::fragment(&encoded, generate_config_id()).expect("fragment it");
+        for frame in &frames {
+            let packet = MeshPacket {
+                from: 0,
+                to: BROADCAST_NODE,
+                id: generate_config_id(),
+                channel: 0,
+                want_ack: false,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
+                    portnum: PortNum::PrivateApp as i32,
+                    payload: frame.clone(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let to_radio = ToRadio { payload_variant: Some(to_radio::PayloadVariant::Packet(packet)) };
+            write_to_radio(&mut stream, &to_radio).expect("write_to_radio failed sending a real WSP/2 fragment to the live daemon");
+        }
     }
 }
