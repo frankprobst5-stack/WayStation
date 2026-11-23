@@ -411,6 +411,227 @@ function StatisticsTab({ tracks }: { tracks: AircraftTrack[] }) {
   );
 }
 
+// Mirrors db::FlightAlertRule / db::FlightAlertLogEntry.
+interface FlightAlertRule {
+  id: number;
+  kind: string;
+  threshold: number | null;
+  window_minutes: number | null;
+  enabled: boolean;
+  created_at: string;
+}
+interface FlightAlertLogEntry {
+  id: number;
+  rule_id: number;
+  icao24: string;
+  callsign: string | null;
+  detail: string;
+  triggered_at: string;
+}
+
+const ALERT_KINDS = [
+  { value: "radius", label: "Within radius (miles)", needsWindow: false },
+  { value: "altitude_below", label: "Altitude below (ft)", needsWindow: false },
+  { value: "altitude_above", label: "Altitude above (ft)", needsWindow: false },
+  { value: "recurring", label: "Recurring sightings (count)", needsWindow: true },
+  { value: "disappeared", label: "Disappeared from tracking", needsWindow: false },
+] as const;
+
+function ruleDescription(r: FlightAlertRule): string {
+  switch (r.kind) {
+    case "radius":
+      return `Within ${r.threshold} mi of this station`;
+    case "altitude_below":
+      return `Altitude below ${r.threshold} ft`;
+    case "altitude_above":
+      return `Altitude above ${r.threshold} ft`;
+    case "recurring":
+      return `Seen ${r.threshold}+ times in ${r.window_minutes} min`;
+    case "disappeared":
+      return "Aircraft disappears from tracking";
+    default:
+      return r.kind;
+  }
+}
+
+/** Real alert rules checked against every incoming poll (flight_tracking.rs's
+ * own check_flight_alerts), closing this tab's own long-standing "Not built
+ * yet" gap. A rule fires at most once per cooldown window per aircraft
+ * (debounced server-side) so a loitering aircraft doesn't spam the log
+ * every 5-minute poll. */
+function AlertsTab() {
+  const [rules, setRules] = useState<FlightAlertRule[] | null>(null);
+  const [log, setLog] = useState<FlightAlertLogEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [kind, setKind] = useState<(typeof ALERT_KINDS)[number]["value"]>("radius");
+  const [threshold, setThreshold] = useState("25");
+  const [windowMinutes, setWindowMinutes] = useState("60");
+
+  async function refreshRules() {
+    try {
+      setRules(await invoke<FlightAlertRule[]>("get_flight_alert_rules"));
+    } catch (err) {
+      console.error("get_flight_alert_rules failed:", err);
+    }
+  }
+
+  async function refreshLog() {
+    try {
+      setLog(await invoke<FlightAlertLogEntry[]>("get_flight_alert_log"));
+    } catch (err) {
+      console.error("get_flight_alert_log failed:", err);
+    }
+  }
+
+  useEffect(() => {
+    refreshRules();
+    refreshLog();
+    let unlisten: (() => void) | undefined;
+    listen("flight-alert-triggered", refreshLog).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  const selectedKind = ALERT_KINDS.find((k) => k.value === kind)!;
+
+  async function addRule(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const thresholdNum = kind === "disappeared" ? null : parseFloat(threshold);
+    if (kind !== "disappeared" && (isNaN(thresholdNum!) || thresholdNum! <= 0)) {
+      setError("Enter a real positive threshold.");
+      return;
+    }
+    try {
+      await invoke("create_flight_alert_rule", {
+        kind,
+        threshold: thresholdNum,
+        windowMinutes: selectedKind.needsWindow ? parseInt(windowMinutes) || 60 : null,
+      });
+      await refreshRules();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function toggleRule(id: number, enabled: boolean) {
+    try {
+      await invoke("set_flight_alert_rule_enabled", { id, enabled: !enabled });
+      await refreshRules();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function deleteRule(id: number) {
+    try {
+      await invoke("delete_flight_alert_rule", { id });
+      await refreshRules();
+      await refreshLog();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  return (
+    <div className="panel-sync">
+      <p className="sync-lede">
+        Real rules checked against every live poll (every 5 minutes) — not just a UI. A rule re-fires for the same
+        aircraft at most once every 30 minutes, so a loitering or circling aircraft doesn't spam the log.
+      </p>
+
+      <div className="sync-section">
+        <div className="sync-section-head">
+          <h3>Add a Rule</h3>
+        </div>
+        <form onSubmit={addRule} className="add-ribbon" style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+          <select value={kind} onChange={(e) => setKind(e.currentTarget.value as typeof kind)}>
+            {ALERT_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+          {kind !== "disappeared" && (
+            <input
+              type="number"
+              value={threshold}
+              onChange={(e) => setThreshold(e.currentTarget.value)}
+              placeholder={kind.startsWith("altitude") ? "Feet" : kind === "recurring" ? "Count" : "Miles"}
+              style={{ width: "120px" }}
+              min="0"
+            />
+          )}
+          {selectedKind.needsWindow && (
+            <input
+              type="number"
+              value={windowMinutes}
+              onChange={(e) => setWindowMinutes(e.currentTarget.value)}
+              placeholder="Window (min)"
+              style={{ width: "120px" }}
+              min="1"
+            />
+          )}
+          <button type="submit" className="action-btn">
+            + Add Rule
+          </button>
+        </form>
+        {error && <div className="panel-alerts-empty">{error}</div>}
+      </div>
+
+      <div className="sync-section" style={{ marginTop: "1rem" }}>
+        <div className="sync-section-head">
+          <h3>Active Rules</h3>
+        </div>
+        {!rules || rules.length === 0 ? (
+          <div className="panel-alerts-empty">No alert rules yet — add one above.</div>
+        ) : (
+          <div className="mesh-participant-list">
+            {rules.map((r) => (
+              <div key={r.id} className="mesh-participant-row">
+                <div className="mesh-participant-body">
+                  <div className="mesh-participant-name-row">
+                    <span className="resource-label">{ruleDescription(r)}</span>
+                    {!r.enabled && <span className="resource-chip">off</span>}
+                  </div>
+                </div>
+                <button type="button" className="action-btn" onClick={() => toggleRule(r.id, r.enabled)}>
+                  {r.enabled ? "Disable" : "Enable"}
+                </button>
+                <button type="button" className="action-btn" onClick={() => deleteRule(r.id)}>
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="sync-section" style={{ marginTop: "1rem" }}>
+        <div className="sync-section-head">
+          <h3>Alert Log</h3>
+        </div>
+        {!log || log.length === 0 ? (
+          <div className="panel-alerts-empty">Nothing has triggered yet.</div>
+        ) : (
+          <div className="panel-alerts">
+            {log.map((entry) => (
+              <div key={entry.id} className="alert-card">
+                <div className="alert-header">
+                  <span>{entry.callsign ?? entry.icao24}</span>
+                  <span>{new Date(entry.triggered_at).toLocaleString()}</span>
+                </div>
+                <div className="alert-area">{entry.detail}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FlightTrackingPanel() {
   const [tracks, setTracks] = useState<AircraftTrack[] | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
@@ -472,13 +693,7 @@ function FlightTrackingPanel() {
         {tab === "Aircraft List" && <AircraftListTab tracks={filtered} onSelect={setSelected} />}
         {tab === "Filters" && <FiltersTab filters={filters} setFilters={setFilters} matchCount={filtered.length} totalCount={tracks.length} />}
         {tab === "Statistics" && <StatisticsTab tracks={tracks} />}
-        {tab === "Alerts" && (
-          <div className="bandplan-disclaimer">
-            Not built yet — aircraft entering a radius, altitude thresholds, recurring sightings, or disappearing
-            from tracking would need a real backend (a rules table plus a check against every incoming update),
-            not just a UI. Flagged here rather than faked.
-          </div>
-        )}
+        {tab === "Alerts" && <AlertsTab />}
       </div>
     </div>
   );

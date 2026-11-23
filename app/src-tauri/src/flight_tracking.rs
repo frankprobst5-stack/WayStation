@@ -127,6 +127,94 @@ fn fetch_states(lat: f64, lon: f64) -> Result<Vec<IncomingAircraftTrack>, String
     Ok(resp.states.unwrap_or_default().iter().filter_map(|f| parse_state(f)).collect())
 }
 
+/// Great-circle distance in miles -- the standard haversine formula, not a
+/// crate: ten lines of well-known math, the same "don't add a dependency
+/// for something this small" judgment call this app already makes
+/// elsewhere, and the one real new calculation this alert-rules feature
+/// needs (every other distance calculation in this app lives client-side
+/// in `lib/greatCircle.ts`, not reachable from here).
+fn distance_miles(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    const EARTH_RADIUS_MI: f64 = 3958.8;
+    let (lat1, lon1, lat2, lon2) = (lat1.to_radians(), lon1.to_radians(), lat2.to_radians(), lon2.to_radians());
+    let dlat = lat2 - lat1;
+    let dlon = lon2 - lon1;
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    EARTH_RADIUS_MI * 2.0 * a.sqrt().asin()
+}
+
+/// Evaluates every enabled rule against this poll's real fetched tracks,
+/// logging (and emitting) a real alert the moment a rule's own condition
+/// is met for a given aircraft -- a real rules table plus a check against
+/// every incoming update, closing FlightTrackingPanel's own named gap
+/// ("Not built yet -- aircraft entering a radius, altitude thresholds,
+/// recurring sightings, or disappearing from tracking would need a real
+/// backend"). `old_tracks` is the PREVIOUS poll's snapshot, captured by
+/// the caller before `replace_aircraft_tracks` overwrites it -- the only
+/// way 'disappeared' can know what used to be there.
+fn check_flight_alerts(app: &AppHandle, old_tracks: &[db::AircraftTrack], new_tracks: &[IncomingAircraftTrack], station_lat: f64, station_lon: f64) {
+    let db = app.state::<Db>();
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let rules = db::get_flight_alert_rules_conn(&conn).into_iter().filter(|r| r.enabled);
+    let mut fired = false;
+
+    for rule in rules {
+        match rule.kind.as_str() {
+            "radius" => {
+                let Some(threshold) = rule.threshold else { continue };
+                for t in new_tracks {
+                    let (Some(lat), Some(lon)) = (t.latitude, t.longitude) else { continue };
+                    let miles = distance_miles(station_lat, station_lon, lat, lon);
+                    if miles <= threshold && !db::recently_alerted_conn(&conn, rule.id, &t.icao24) {
+                        let detail = format!("{:.1} mi from this station (within the {:.0} mi alert radius)", miles, threshold);
+                        db::log_flight_alert_conn(&conn, rule.id, &t.icao24, t.callsign.as_deref(), &detail);
+                        fired = true;
+                    }
+                }
+            }
+            "altitude_below" | "altitude_above" => {
+                let Some(threshold_ft) = rule.threshold else { continue };
+                for t in new_tracks {
+                    let Some(alt_m) = t.altitude_m else { continue };
+                    let alt_ft = alt_m * 3.28084;
+                    let hit = if rule.kind == "altitude_below" { alt_ft < threshold_ft } else { alt_ft > threshold_ft };
+                    if hit && !db::recently_alerted_conn(&conn, rule.id, &t.icao24) {
+                        let word = if rule.kind == "altitude_below" { "below" } else { "above" };
+                        let detail = format!("altitude {:.0} ft is {} the {:.0} ft alert threshold", alt_ft, word, threshold_ft);
+                        db::log_flight_alert_conn(&conn, rule.id, &t.icao24, t.callsign.as_deref(), &detail);
+                        fired = true;
+                    }
+                }
+            }
+            "recurring" => {
+                let (Some(threshold_count), Some(window)) = (rule.threshold, rule.window_minutes) else { continue };
+                for t in new_tracks {
+                    let count = db::recent_sighting_count_conn(&conn, &t.icao24, window);
+                    if (count as f64) >= threshold_count && !db::recently_alerted_conn(&conn, rule.id, &t.icao24) {
+                        let detail = format!("seen {count} times in the last {window} minutes (threshold {threshold_count:.0})");
+                        db::log_flight_alert_conn(&conn, rule.id, &t.icao24, t.callsign.as_deref(), &detail);
+                        fired = true;
+                    }
+                }
+            }
+            "disappeared" => {
+                let new_icaos: std::collections::HashSet<&str> = new_tracks.iter().map(|t| t.icao24.as_str()).collect();
+                for old in old_tracks {
+                    if !new_icaos.contains(old.icao24.as_str()) && !db::recently_alerted_conn(&conn, rule.id, &old.icao24) {
+                        let detail = "no longer appearing in the latest fetch -- out of range or signal lost".to_string();
+                        db::log_flight_alert_conn(&conn, rule.id, &old.icao24, old.callsign.as_deref(), &detail);
+                        fired = true;
+                    }
+                }
+            }
+            other => eprintln!("flight_tracking: unknown alert rule kind {other:?}, skipping"),
+        }
+    }
+    drop(conn);
+    if fired {
+        let _ = app.emit("flight-alert-triggered", ());
+    }
+}
+
 pub fn poll_once(app: &AppHandle) {
     let grid = {
         let db = app.state::<Db>();
@@ -150,6 +238,11 @@ pub fn poll_once(app: &AppHandle) {
     match fetch_states(lat, lon) {
         Ok(tracks) => {
             let fetched_at = Utc::now().to_rfc3339();
+            let old_tracks = {
+                let db = app.state::<Db>();
+                let conn = db.0.lock().expect("db mutex poisoned");
+                db::get_aircraft_tracks_conn(&conn)
+            };
             {
                 let db = app.state::<Db>();
                 let mut conn = db.0.lock().expect("db mutex poisoned");
@@ -157,6 +250,7 @@ pub fn poll_once(app: &AppHandle) {
                 db::append_aircraft_track_history(&mut conn, &tracks, Utc::now().timestamp());
                 connectivity::report_source_health(&conn, SOURCE_ID, SOURCE_LABEL, Status::Healthy, Via::Internet, None);
             }
+            check_flight_alerts(app, &old_tracks, &tracks, lat, lon);
             let _ = app.emit("aircraft-tracks-changed", ());
         }
         Err(detail) => {
@@ -224,5 +318,21 @@ mod tests {
         let f = fields(r#"["a1b2c3","SKW5768 ","United States",null,0,null,null,null,false,null,null,null,null,null,null,false,0]"#);
         let track = parse_state(&f).unwrap();
         assert_eq!(track.callsign.as_deref(), Some("SKW5768"));
+    }
+
+    #[test]
+    fn distance_miles_is_zero_for_the_same_point() {
+        assert!(distance_miles(35.0, -101.0, 35.0, -101.0) < 0.001);
+    }
+
+    #[test]
+    fn distance_miles_matches_a_real_known_city_pair() {
+        // Dallas (32.7767, -96.7970) to Amarillo (35.2220, -101.8313) --
+        // real published great-circle distance is ~322 miles. A loose
+        // tolerance (not an exact-digit assertion) since this is checking
+        // the formula is right, not matching one specific online
+        // calculator's own rounding.
+        let miles = distance_miles(32.7767, -96.7970, 35.2220, -101.8313);
+        assert!((300.0..350.0).contains(&miles), "expected roughly 322 miles, got {miles}");
     }
 }

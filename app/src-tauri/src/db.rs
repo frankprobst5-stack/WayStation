@@ -3220,9 +3220,13 @@ pub struct AircraftTrack {
     pub last_contact: i64,
 }
 
-#[tauri::command]
-pub fn get_aircraft_tracks(db: State<Db>) -> Vec<AircraftTrack> {
-    let conn = db.0.lock().expect("db mutex poisoned");
+/// Split out so `flight_tracking.rs`'s own alert-rule check (specifically
+/// the "disappeared from tracking" rule, which needs the PREVIOUS poll's
+/// snapshot before `replace_aircraft_tracks` overwrites it) can read this
+/// without a second, deadlocking `db.0.lock()` -- same established
+/// `_conn`-plus-thin-command-wrapper split this file already uses
+/// elsewhere (e.g. `get_mesh_nodes_conn`, `get_aircraft_track_history_conn`).
+pub fn get_aircraft_tracks_conn(conn: &Connection) -> Vec<AircraftTrack> {
     let mut stmt = conn
         .prepare(
             "SELECT id, fetched_at, icao24, callsign, origin_country, latitude, longitude, altitude_m,
@@ -3251,6 +3255,12 @@ pub fn get_aircraft_tracks(db: State<Db>) -> Vec<AircraftTrack> {
     .expect("failed to query aircraft_tracks")
     .filter_map(Result::ok)
     .collect()
+}
+
+#[tauri::command]
+pub fn get_aircraft_tracks(db: State<Db>) -> Vec<AircraftTrack> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_aircraft_tracks_conn(&conn)
 }
 
 /// Same replace-on-successful-fetch pattern as `IncomingPotaSpot` --
@@ -3442,6 +3452,161 @@ pub fn clear_calc_history(db: State<Db>) -> Result<(), String> {
     let conn = db.0.lock().expect("db mutex poisoned");
     clear_calc_history_conn(&conn);
     Ok(())
+}
+
+// --- Flight tracking alert rules (FlightTrackingPanel's own "Not built
+// yet" gap) -- real CRUD here; the actual per-poll rule evaluation lives
+// in flight_tracking.rs, which is the only place that both has the
+// freshly-fetched tracks and runs on every real poll cycle.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlightAlertRule {
+    pub id: i64,
+    pub kind: String,
+    pub threshold: Option<f64>,
+    pub window_minutes: Option<i64>,
+    pub enabled: bool,
+    pub created_at: String,
+}
+
+const FLIGHT_ALERT_KINDS: [&str; 5] = ["radius", "altitude_below", "altitude_above", "recurring", "disappeared"];
+
+pub fn get_flight_alert_rules_conn(conn: &Connection) -> Vec<FlightAlertRule> {
+    let mut stmt = conn
+        .prepare("SELECT id, kind, threshold, window_minutes, enabled, created_at FROM flight_alert_rules ORDER BY id")
+        .expect("failed to prepare flight_alert_rules query");
+    stmt.query_map([], |row| {
+        Ok(FlightAlertRule {
+            id: row.get(0)?,
+            kind: row.get(1)?,
+            threshold: row.get(2)?,
+            window_minutes: row.get(3)?,
+            enabled: row.get::<_, i64>(4)? != 0,
+            created_at: row.get(5)?,
+        })
+    })
+    .expect("failed to query flight_alert_rules")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+#[tauri::command]
+pub fn get_flight_alert_rules(db: State<Db>) -> Vec<FlightAlertRule> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_flight_alert_rules_conn(&conn)
+}
+
+#[tauri::command]
+pub fn create_flight_alert_rule(db: State<Db>, kind: String, threshold: Option<f64>, window_minutes: Option<i64>) -> Result<FlightAlertRule, String> {
+    if !FLIGHT_ALERT_KINDS.contains(&kind.as_str()) {
+        return Err(format!("unknown alert kind {kind:?} -- must be one of {FLIGHT_ALERT_KINDS:?}"));
+    }
+    if kind != "disappeared" && threshold.is_none() {
+        return Err(format!("{kind} rules need a real threshold"));
+    }
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO flight_alert_rules (kind, threshold, window_minutes, enabled, created_at) VALUES (?1, ?2, ?3, 1, ?4)",
+        params![kind, threshold, window_minutes, now],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    Ok(FlightAlertRule { id, kind, threshold, window_minutes, enabled: true, created_at: now })
+}
+
+#[tauri::command]
+pub fn set_flight_alert_rule_enabled(db: State<Db>, id: i64, enabled: bool) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    conn.execute("UPDATE flight_alert_rules SET enabled = ?1 WHERE id = ?2", params![enabled as i64, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_flight_alert_rule(db: State<Db>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    conn.execute("DELETE FROM flight_alert_rules WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM flight_alert_log WHERE rule_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FlightAlertLogEntry {
+    pub id: i64,
+    pub rule_id: i64,
+    pub icao24: String,
+    pub callsign: Option<String>,
+    pub detail: String,
+    pub triggered_at: String,
+}
+
+/// Real, bounded recent-activity log -- the actual alert history, not
+/// just a live/transient banner that vanishes once the next poll runs.
+pub fn get_flight_alert_log_conn(conn: &Connection) -> Vec<FlightAlertLogEntry> {
+    let mut stmt = conn
+        .prepare("SELECT id, rule_id, icao24, callsign, detail, triggered_at FROM flight_alert_log ORDER BY id DESC LIMIT 200")
+        .expect("failed to prepare flight_alert_log query");
+    stmt.query_map([], |row| {
+        Ok(FlightAlertLogEntry {
+            id: row.get(0)?,
+            rule_id: row.get(1)?,
+            icao24: row.get(2)?,
+            callsign: row.get(3)?,
+            detail: row.get(4)?,
+            triggered_at: row.get(5)?,
+        })
+    })
+    .expect("failed to query flight_alert_log")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+#[tauri::command]
+pub fn get_flight_alert_log(db: State<Db>) -> Vec<FlightAlertLogEntry> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_flight_alert_log_conn(&conn)
+}
+
+/// Real debounce: a rule that stays true every 5-minute poll (an aircraft
+/// loitering inside a radius, say) must not re-alert every single cycle --
+/// an operator wants to know something NEW happened, not a repeat of the
+/// same notification. Only re-fires once the same icao24+rule_id pair has
+/// been quiet in the log for at least this long.
+const FLIGHT_ALERT_COOLDOWN_MINUTES: i64 = 30;
+
+pub fn recently_alerted_conn(conn: &Connection, rule_id: i64, icao24: &str) -> bool {
+    let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(FLIGHT_ALERT_COOLDOWN_MINUTES)).to_rfc3339();
+    conn.query_row(
+        "SELECT COUNT(*) FROM flight_alert_log WHERE rule_id = ?1 AND icao24 = ?2 AND triggered_at > ?3",
+        params![rule_id, icao24, cutoff],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
+        > 0
+}
+
+pub fn log_flight_alert_conn(conn: &Connection, rule_id: i64, icao24: &str, callsign: Option<&str>, detail: &str) {
+    conn.execute(
+        "INSERT INTO flight_alert_log (rule_id, icao24, callsign, detail, triggered_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![rule_id, icao24, callsign, detail, chrono::Utc::now().to_rfc3339()],
+    )
+    .expect("failed to insert flight_alert_log");
+}
+
+/// How many times `icao24` has appeared in the trail history within the
+/// last `window_minutes` -- what a 'recurring' rule actually counts
+/// against its own threshold. Reuses `aircraft_track_history` (Phase 7's
+/// own real per-aircraft position log) rather than a second counter,
+/// since every real sighting already lands a row there.
+pub fn recent_sighting_count_conn(conn: &Connection, icao24: &str, window_minutes: i64) -> i64 {
+    let cutoff = chrono::Utc::now().timestamp() - window_minutes * 60;
+    conn.query_row(
+        "SELECT COUNT(*) FROM aircraft_track_history WHERE icao24 = ?1 AND recorded_at > ?2",
+        params![icao24, cutoff],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -5178,6 +5343,34 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL
     );
     "#,
+    // v60: flight tracking alert rules, closing FlightTrackingPanel's own
+    // "Not built yet" gap -- a real rules table plus a check against every
+    // incoming poll, not just a UI. `kind` is one of: 'radius' (threshold
+    // = miles from this station's own grid square), 'altitude_below' /
+    // 'altitude_above' (threshold = feet), 'recurring' (threshold = sighting
+    // count within window_minutes), 'disappeared' (no threshold needed --
+    // fires when a previously-tracked aircraft is absent from the latest
+    // fetch). `flight_alert_log` is the real history of what actually
+    // fired, not just a live/transient banner -- an operator checking back
+    // later can see what happened while they were away.
+    r#"
+    CREATE TABLE flight_alert_rules (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind           TEXT NOT NULL,
+        threshold      REAL,
+        window_minutes INTEGER,
+        enabled        INTEGER NOT NULL DEFAULT 1,
+        created_at     TEXT NOT NULL
+    );
+    CREATE TABLE flight_alert_log (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        rule_id      INTEGER NOT NULL,
+        icao24       TEXT NOT NULL,
+        callsign     TEXT,
+        detail       TEXT NOT NULL,
+        triggered_at TEXT NOT NULL
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -6223,5 +6416,65 @@ mod tests {
         save_calc_history_conn(&conn, "SWR", "entry two");
         clear_calc_history_conn(&conn);
         assert!(get_calc_history_conn(&conn).is_empty());
+    }
+
+    #[test]
+    fn flight_alert_rules_round_trip_and_default_to_enabled() {
+        let conn = fresh_db();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO flight_alert_rules (kind, threshold, window_minutes, enabled, created_at) VALUES ('radius', 25.0, NULL, 1, ?1)",
+            params![now],
+        )
+        .unwrap();
+        let rules = get_flight_alert_rules_conn(&conn);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].kind, "radius");
+        assert_eq!(rules[0].threshold, Some(25.0));
+        assert!(rules[0].enabled);
+    }
+
+    #[test]
+    fn disabled_flight_alert_rules_are_still_listed_but_flagged_off() {
+        let conn = fresh_db();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO flight_alert_rules (kind, threshold, window_minutes, enabled, created_at) VALUES ('altitude_below', 500.0, NULL, 0, ?1)",
+            params![now],
+        )
+        .unwrap();
+        let rules = get_flight_alert_rules_conn(&conn);
+        assert_eq!(rules.len(), 1);
+        assert!(!rules[0].enabled, "get_flight_alert_rules_conn must still return a disabled rule -- callers filter, not the query");
+    }
+
+    #[test]
+    fn recently_alerted_is_false_until_a_real_log_entry_exists_then_true() {
+        let conn = fresh_db();
+        assert!(!recently_alerted_conn(&conn, 1, "a1b2c3"), "no log entry yet -- must not report a false positive");
+        log_flight_alert_conn(&conn, 1, "a1b2c3", Some("UAL123"), "test detail");
+        assert!(recently_alerted_conn(&conn, 1, "a1b2c3"));
+        // A different rule or a different aircraft must not be affected
+        // by an unrelated rule's own cooldown.
+        assert!(!recently_alerted_conn(&conn, 2, "a1b2c3"));
+        assert!(!recently_alerted_conn(&conn, 1, "d4e5f6"));
+    }
+
+    #[test]
+    fn recent_sighting_count_counts_only_within_the_real_window() {
+        let conn = fresh_db();
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO aircraft_track_history (icao24, latitude, longitude, recorded_at) VALUES ('a1b2c3', 35.0, -101.0, ?1)",
+            params![now - 60], // 1 minute ago -- inside a 10-minute window
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO aircraft_track_history (icao24, latitude, longitude, recorded_at) VALUES ('a1b2c3', 35.0, -101.0, ?1)",
+            params![now - 20 * 60], // 20 minutes ago -- outside a 10-minute window
+        )
+        .unwrap();
+        assert_eq!(recent_sighting_count_conn(&conn, "a1b2c3", 10), 1);
+        assert_eq!(recent_sighting_count_conn(&conn, "a1b2c3", 30), 2);
     }
 }
