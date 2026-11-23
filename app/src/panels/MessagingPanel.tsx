@@ -6,6 +6,7 @@ import NetControlPanel from "./NetControlPanel";
 import WinlinkPanel from "./WinlinkPanel";
 import Js8CallPanel from "./Js8CallPanel";
 import PacketPanel from "./PacketPanel";
+import QrTransportPanel from "./QrTransportPanel";
 
 // Consolidates six panels that used to each show up as their own separate
 // stacked tile under the "messaging" sidebar category into one tabbed
@@ -19,7 +20,7 @@ import PacketPanel from "./PacketPanel";
 // not "Pine Ridge Incident" or "Field Team Alpha"), and message templates
 // / preset quick-messages (no template storage anywhere in the backend).
 
-const TABS = ["Overview", "Mesh (Meshtastic)", "Messages (ICS-213/309)", "Net Control", "Winlink", "JS8Call", "Packet (APRS/Direwolf)"] as const;
+const TABS = ["Overview", "Mesh (Meshtastic)", "Messages (ICS-213/309)", "Net Control", "Winlink", "JS8Call", "Packet (APRS/Direwolf)", "QR Code"] as const;
 type Tab = (typeof TABS)[number];
 
 interface MeshStatus { connected: boolean }
@@ -206,6 +207,7 @@ function MessagingPanel() {
         {tab === "Winlink" && <WinlinkPanel />}
         {tab === "JS8Call" && <Js8CallPanel />}
         {tab === "Packet (APRS/Direwolf)" && <PacketPanel />}
+        {tab === "QR Code" && <QrTransportPanel />}
       </div>
     </div>
   );

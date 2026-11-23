@@ -21,6 +21,7 @@ mod nws;
 mod pat;
 mod pota;
 mod pskreporter;
+mod qr_transport;
 mod readiness;
 mod repeaterbook;
 mod required_software;
@@ -113,6 +114,7 @@ pub fn run() {
             app.manage(discovery::DiscoveryState::new());
             app.manage(auto_sync::AutoSyncState::new());
             app.manage(system_health::SystemHealthState::new());
+            app.manage(qr_transport::QrImportState::new());
             system_health::spawn_poller(app.handle().clone());
             discovery::spawn_advertiser(app.handle().clone());
             discovery::spawn_browser(app.handle().clone());
@@ -297,6 +299,10 @@ pub fn run() {
             repeaterbook::search_repeaters,
             required_software::get_required_software,
             backup::backup_database,
+            qr_transport::generate_qr_card,
+            qr_transport::import_qr_image,
+            qr_transport::get_qr_import_progress,
+            qr_transport::clear_qr_import,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

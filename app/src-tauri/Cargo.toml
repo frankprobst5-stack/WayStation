@@ -53,4 +53,9 @@ uuid = { version = "1", features = ["v4"] }
 # TCP client is hand-written against Meshtastic's own documented wire
 # framing (verified from meshtastic.org before writing it).
 meshtastic = { version = "0.1", default-features = false, features = ["serde"] }
+qrcode = "0.15"
+rqrr = "0.11"
+flate2 = "1"
+base64 = "0.22"
+image = "0.25"
 
