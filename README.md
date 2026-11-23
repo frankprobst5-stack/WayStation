@@ -18,15 +18,23 @@ Online connectivity enriches the local operational picture while it's available.
 
 ---
 
-## Status: early public test release
+## Status: public release, post-field-test
 
-This is a genuine, working build — not a prototype. Under the hood: a Rust/Tauri backend with 150+ automated tests, 45+ real panels (net control, ICS-style incident forms, mesh networking, Winlink, JS8Call, rig/rotator control, flight and satellite tracking, propagation and space-weather data, and more), and an honest internal status taxonomy that this project's own [ROADMAP.md](ROADMAP.md) uses to track exactly what's verified versus still rough.
+This is a genuine, working build — not a prototype. Under the hood: a Rust/Tauri backend with 200+ automated tests, 50+ real panels (net control, ICS-style incident forms, mesh networking, Winlink, JS8Call, rig/rotator control, flight and satellite tracking, propagation and space-weather data, and more), and an honest internal status taxonomy that this project's own [ROADMAP.md](ROADMAP.md) uses to track exactly what's verified versus still rough.
 
-But it's still pre-1.0 and under active field testing (a real month-long offline field trial started 2026-09-07 — this public release is an expanded, faster version of that same test, not a replacement for it). Known, honestly-disclosed gaps as of this release:
+The real month-long offline field trial that gated earlier releases concluded 2026-09-24 (about two weeks ahead of schedule, no crashes or data loss beyond what's already fixed) — this release reflects real feature work that landed afterward, not just the field-tested baseline:
 
-- **Two sections of the in-app manual aren't written yet**: mesh/JS8Call/rig-control setup walkthroughs, and the amateur-radio band-plan reference. Rather than guess at ham-radio-specific details (a wrong band edge is a real compliance problem, not just a typo), these are left honestly marked "not written yet" in-app until they can be done right.
+- **A real pick-your-capability module system** (Settings → Modules): every transport (Mesh, Winlink, JS8Call, Packet/APRS, ATAK/CoT, Rig, Rotator) can be switched off individually — off means WayStation opens no connection and does no polling for that capability, not just a hidden tab.
+- **WSP/2 compact mesh sync, now with full reconciliation**: manifests travel over Meshtastic as compact binary fragments sized to the real 233-byte over-the-air ceiling, and a station that receives one now automatically pulls back whatever it's missing and merges it — the same conflict detection and signature verification every other sync transport (file, authenticated TCP) already has.
+- **QR-code packet transport**: turn a message into 4 QR-code panels another device just photographs — zero radio, zero network. Any 3 of the 4 panels fully reconstruct it. Wire-compatible with Keith B. Phillips's own [qrcoder](https://github.com/keithbphillips/qrcoder) apps, not just similar to them.
+- **ATAK/CoT interoperability**: exchanges position data directly with ATAK/WinTAK over their own real default network broadcast — no server, no account, nothing to install on the ATAK side.
+- A flight-tracking trail line, a tactical-shorthand compressor for mesh messages, and real Critical Resource (Power/Water/Food) status chips.
+
+Known, honestly-disclosed gaps as of this release:
+
 - **No macOS build exists yet** — only Windows and Linux installers are produced by this release.
 - Multi-node mesh networking is real and tested in isolation, but genuinely unverified with a second physical node in the field — see ROADMAP.md's own status tags for the full, current picture of what's BUILT+VERIFIED versus BUILT-BUT-HARDWARE-PENDING.
+- ATAK/CoT interoperability covers position/situational data, not GeoChat (a separate, more involved CoT shape with its own delivery-ack handshake) and not a TAK Server/TLS path — LAN broadcast only, the zero-configuration case.
 
 If you hit something broken, that's exactly what this release is for — please report it.
 
@@ -54,7 +62,7 @@ Grab the installer for your platform from this repo's **[Releases page](../../re
 - **Windows**: download and run the `.msi`.
 - **Linux**: download the `.deb` (Debian/Ubuntu) or the `.AppImage` (most other distros — make it executable and run it directly, no install needed).
 
-These installers are unsigned (no code-signing certificate is configured yet), so Windows SmartScreen or your Linux distro's package manager may warn before running them the first time — that's expected for an early test release, not a sign anything's wrong.
+These installers are unsigned (no code-signing certificate is configured yet), so Windows SmartScreen or your Linux distro's package manager may warn before running them the first time — expected for this project at its current size, not a sign anything's wrong.
 
 ### Building from source instead
 

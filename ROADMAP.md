@@ -573,6 +573,29 @@ After the exercise or incident, WayStation exports the communications log, messa
 
 ## Changelog
 
+- **2026-11-22 (v0.2.0: the 3 small items, then the v2 backlog's 3 real-user-facing items,
+  then this release)** — Frank's own sequencing: finish the small items left from the
+  WSP/2 work (operator-visible stalled-fragment status, a tactical-shorthand compressor for
+  mesh messages, a flight-path trail line), then move into the v2 backlog and build real
+  items rather than leave them parked ("people been waiting on them anyway"), then cut a
+  release. Picked **WSP/1 sync over mesh** first (most scoped, the plumbing already proven
+  2026-11-08), then **QR-code packet transport** and **ATAK/CoT interoperability** in turn,
+  all three real backlog entries, not newly invented scope. See each item's own entry above
+  (v2 backlog section) for full build detail; summarized here: `get_pending_manifest_fragments`
+  wired into `MeshPanel.tsx`; `tactical_shorthand.rs` (plain-language ICS abbreviations only,
+  deliberately not 10-codes); `aircraft_track_history` (migration v57) plus a MapLibre trail
+  layer on `FlightTrackingPanel.tsx`; `wsp2.rs` gained `KIND_OBJECTS_REQUEST`/`KIND_OBJECTS`
+  closing the real "manifest arrives but nothing acts on it" gap; `qr_transport.rs` natively
+  ports Keith B. Phillips's own `qrcoder` scheme, wire-compatible with his real apps; `cot.rs`
+  speaks real CoT XML over ATAK's own default SA multicast group. 204 tests total (up from
+  173 at the start of this work), all passing, 11 live-only skipped. Version bumped
+  0.1.1 → 0.2.0 (`Cargo.toml`/`package.json`/`tauri.conf.json`) — a real minor release, not a
+  patch: a new module system entry (ATAK/CoT), two new transports, and a new map layer landed
+  since the last tag. README.md updated to match (test/panel counts, the field test's real
+  2026-09-24 conclusion, and the four features above) — its "manual sections not written yet"
+  gap was also found already resolved (real mesh/JS8Call/rig setup walkthroughs and a real
+  band-plan reference both exist in-app now, from earlier unreleased work), so that bullet
+  was removed rather than left stale.
 - **2026-11-07 (Stage 8 release installed and confirmed live)** — A fresh `.deb` carrying
   Critical Resource Status chips and keyword-triggered alert banners was built, installed
   for real via `dpkg`, and launched. This was also the first time the real installed
