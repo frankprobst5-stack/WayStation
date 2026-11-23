@@ -8,6 +8,8 @@ import Js8CallPanel from "./Js8CallPanel";
 import PacketPanel from "./PacketPanel";
 import QrTransportPanel from "./QrTransportPanel";
 import CotPanel from "./CotPanel";
+import NamedChannelsPanel from "./NamedChannelsPanel";
+import MessageTemplatesPanel from "./MessageTemplatesPanel";
 
 // Consolidates six panels that used to each show up as their own separate
 // stacked tile under the "messaging" sidebar category into one tabbed
@@ -15,13 +17,25 @@ import CotPanel from "./CotPanel";
 // treatment WeatherPanel and ActivityPanel already got -- every tab embeds
 // the real existing panel component unchanged.
 //
-// Two things the mockup shows that genuinely don't exist yet, called out
-// honestly on the Overview instead of faked: named/labeled channels
-// spanning transports (Meshtastic only has numbered channels 0-7 today,
-// not "Pine Ridge Incident" or "Field Team Alpha"), and message templates
-// / preset quick-messages (no template storage anywhere in the backend).
+// Named Channels and Templates are real now (2026-11-23): an operator-
+// given name resolves to whichever per-transport value applies (today,
+// just Meshtastic's numbered channel -- Winlink/JS8Call already address
+// by callsign), and templates are real saved text an operator can
+// quick-fill into Mesh's compose box.
 
-const TABS = ["Overview", "Mesh (Meshtastic)", "Messages (ICS-213/309)", "Net Control", "Winlink", "JS8Call", "Packet (APRS/Direwolf)", "QR Code", "ATAK/CoT"] as const;
+const TABS = [
+  "Overview",
+  "Mesh (Meshtastic)",
+  "Messages (ICS-213/309)",
+  "Net Control",
+  "Winlink",
+  "JS8Call",
+  "Packet (APRS/Direwolf)",
+  "QR Code",
+  "ATAK/CoT",
+  "Named Channels",
+  "Templates",
+] as const;
 type Tab = (typeof TABS)[number];
 
 interface MeshStatus { connected: boolean }
@@ -124,13 +138,25 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
 
         <div className="sync-section">
           <div className="sync-section-head">
-            <h3>Not built yet</h3>
+            <h3>Named Channels</h3>
+            <button type="button" className="weather-link-btn" onClick={() => goTo("Named Channels")}>
+              View Full
+            </button>
           </div>
-          <div className="bandplan-disclaimer">
-            Two things the mockup for this page shows that don't exist here yet: named channels spanning transports
-            (Meshtastic only has numbered channels 0–7 today, not "Pine Ridge Incident" or "Field Team Alpha"), and
-            message templates / preset quick-messages (no template storage anywhere in the backend). Flagged here
-            rather than faked.
+          <div className="alert-card">
+            <div className="alert-area">Give a group a real name once, reuse it across whichever transport you're on.</div>
+          </div>
+        </div>
+
+        <div className="sync-section">
+          <div className="sync-section-head">
+            <h3>Templates</h3>
+            <button type="button" className="weather-link-btn" onClick={() => goTo("Templates")}>
+              View Full
+            </button>
+          </div>
+          <div className="alert-card">
+            <div className="alert-area">Saved quick-messages, pickable from Mesh's own compose box.</div>
           </div>
         </div>
       </div>
@@ -216,6 +242,8 @@ function MessagingPanel() {
         {tab === "Packet (APRS/Direwolf)" && <PacketPanel />}
         {tab === "QR Code" && <QrTransportPanel />}
         {tab === "ATAK/CoT" && <CotPanel />}
+        {tab === "Named Channels" && <NamedChannelsPanel />}
+        {tab === "Templates" && <MessageTemplatesPanel />}
       </div>
     </div>
   );

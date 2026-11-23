@@ -77,6 +77,20 @@ interface MeshSyncMergeSummary {
   signature_status: "unknown_signer" | "unsigned" | "invalid" | "verified";
 }
 
+// Mirrors db::NamedChannel -- only the mesh binding matters here.
+interface NamedChannel {
+  id: number;
+  name: string;
+  meshtastic_channel: number | null;
+}
+
+// Mirrors db::MessageTemplate.
+interface MessageTemplate {
+  id: number;
+  label: string;
+  body: string;
+}
+
 const BROADCAST_NODE = 4294967295; // 0xFFFFFFFF
 const CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7];
 const STATUS_POLL_MS = 5000;
@@ -138,6 +152,29 @@ function MeshPanel() {
   const [syncMerges, setSyncMerges] = useState<MeshSyncMergeSummary[]>([]);
   const [syncingManifest, setSyncingManifest] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [namedChannels, setNamedChannels] = useState<NamedChannel[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+
+  async function refreshNamedChannels() {
+    try {
+      setNamedChannels(await invoke<NamedChannel[]>("get_named_channels"));
+    } catch (err) {
+      console.error("get_named_channels failed:", err);
+    }
+  }
+
+  async function refreshTemplates() {
+    try {
+      setTemplates(await invoke<MessageTemplate[]>("get_message_templates"));
+    } catch (err) {
+      console.error("get_message_templates failed:", err);
+    }
+  }
+
+  function channelLabel(c: number): string {
+    const named = namedChannels.find((n) => n.meshtastic_channel === c);
+    return named ? `${named.name} (ch${c})` : `Channel ${c}`;
+  }
 
   async function refreshNodes() {
     try {
@@ -201,6 +238,8 @@ function MeshPanel() {
     refreshReceivedManifests();
     refreshPendingFragments();
     refreshSyncMerges();
+    refreshNamedChannels();
+    refreshTemplates();
 
     const unlisteners: (() => void)[] = [];
     listen("mesh-nodes-changed", refreshNodes).then((fn) => unlisteners.push(fn));
@@ -513,7 +552,7 @@ function MeshPanel() {
                 >
                   <span className="mesh-channel-row-label">
                     <IconHash className="mesh-inline-icon" />
-                    Channel {c}
+                    {channelLabel(c)}
                   </span>
                   {unreadByChannel.get(c) ? <span className="mesh-unread-badge">{unreadByChannel.get(c)}</span> : null}
                 </button>
@@ -562,7 +601,7 @@ function MeshPanel() {
               >
                 {CHANNELS.map((c) => (
                   <option key={c} value={c}>
-                    All (Broadcast) · ch{c}
+                    All (Broadcast) · {channelLabel(c)}
                   </option>
                 ))}
               </select>
@@ -579,7 +618,7 @@ function MeshPanel() {
             <IconBroadcast className="mesh-inline-icon" />
             <div>
               <div className="mesh-channel-details-title">
-                {toNode === null ? `All (Broadcast) · ch${channel}` : nodeLabel(toNode)}
+                {toNode === null ? `All (Broadcast) · ${channelLabel(channel)}` : nodeLabel(toNode)}
               </div>
               <div className="mesh-channel-details-desc">
                 {toNode === null ? "Broadcast to all nodes on this channel" : "Direct message"}
@@ -651,10 +690,31 @@ function MeshPanel() {
             <select value={channel} onChange={(e) => setChannel(Number(e.currentTarget.value))} disabled={toNode !== null}>
               {CHANNELS.map((c) => (
                 <option key={c} value={c}>
-                  ch{c}
+                  {channelLabel(c)}
                 </option>
               ))}
             </select>
+            {templates.length > 0 && (
+              <select
+                className="mesh-template-select"
+                value=""
+                onChange={(e) => {
+                  const tpl = templates.find((t) => String(t.id) === e.currentTarget.value);
+                  if (tpl) setText(tpl.body);
+                  e.currentTarget.value = "";
+                }}
+                title="Fill the message box from a saved template (manage these on Messaging's Templates tab)"
+              >
+                <option value="" disabled>
+                  Template…
+                </option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            )}
             <label className="mesh-ack-toggle">
               <input type="checkbox" checked={requireAck} onChange={(e) => setRequireAck(e.currentTarget.checked)} />
               Require Ack

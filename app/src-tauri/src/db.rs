@@ -3162,6 +3162,280 @@ pub fn delete_channel(db: State<Db>, id: i64) {
         .expect("failed to delete channel");
 }
 
+// --- Named channels spanning transports (Messaging's own "Not built
+// yet" gap, half 1) -- an operator-given name like "Field Team Alpha"
+// that resolves to whichever per-transport value actually applies.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NamedChannel {
+    pub id: i64,
+    pub name: String,
+    pub meshtastic_channel: Option<i64>,
+    pub winlink_callsign: Option<String>,
+    pub js8call_callsign: Option<String>,
+    pub notes: Option<String>,
+    pub updated_at: String,
+}
+
+fn named_channel_from_row(row: &rusqlite::Row) -> rusqlite::Result<NamedChannel> {
+    Ok(NamedChannel {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        meshtastic_channel: row.get(2)?,
+        winlink_callsign: row.get(3)?,
+        js8call_callsign: row.get(4)?,
+        notes: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+const NAMED_CHANNEL_COLUMNS: &str = "id, name, meshtastic_channel, winlink_callsign, js8call_callsign, notes, updated_at";
+
+pub fn get_named_channels_conn(conn: &Connection) -> Vec<NamedChannel> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT {NAMED_CHANNEL_COLUMNS} FROM named_channels ORDER BY name ASC"))
+        .expect("failed to prepare named_channels query");
+    stmt.query_map([], named_channel_from_row)
+        .expect("failed to query named_channels")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_named_channels(db: State<Db>) -> Vec<NamedChannel> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_named_channels_conn(&conn)
+}
+
+pub fn upsert_named_channel_conn(
+    conn: &Connection,
+    id: Option<i64>,
+    name: String,
+    meshtastic_channel: Option<i64>,
+    winlink_callsign: Option<String>,
+    js8call_callsign: Option<String>,
+    notes: Option<String>,
+) -> Result<NamedChannel, String> {
+    if name.trim().is_empty() {
+        return Err("a named channel needs a real name".to_string());
+    }
+    if let Some(c) = meshtastic_channel {
+        if !(0..=7).contains(&c) {
+            return Err(format!("meshtastic channel must be 0-7, got {c}"));
+        }
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = match id {
+        Some(existing_id) => {
+            conn.execute(
+                "UPDATE named_channels SET name = ?1, meshtastic_channel = ?2, winlink_callsign = ?3, js8call_callsign = ?4, notes = ?5, updated_at = ?6 WHERE id = ?7",
+                params![name, meshtastic_channel, winlink_callsign, js8call_callsign, notes, now, existing_id],
+            )
+            .map_err(|e| e.to_string())?;
+            existing_id
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO named_channels (name, meshtastic_channel, winlink_callsign, js8call_callsign, notes, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![name, meshtastic_channel, winlink_callsign, js8call_callsign, notes, now],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.last_insert_rowid()
+        }
+    };
+    Ok(NamedChannel { id, name, meshtastic_channel, winlink_callsign, js8call_callsign, notes, updated_at: now })
+}
+
+#[tauri::command]
+pub fn upsert_named_channel(
+    db: State<Db>,
+    id: Option<i64>,
+    name: String,
+    meshtastic_channel: Option<i64>,
+    winlink_callsign: Option<String>,
+    js8call_callsign: Option<String>,
+    notes: Option<String>,
+) -> Result<NamedChannel, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    upsert_named_channel_conn(&conn, id, name, meshtastic_channel, winlink_callsign, js8call_callsign, notes)
+}
+
+pub fn delete_named_channel_conn(conn: &Connection, id: i64) {
+    conn.execute("DELETE FROM named_channels WHERE id = ?1", params![id])
+        .expect("failed to delete named_channel");
+}
+
+#[tauri::command]
+pub fn delete_named_channel(db: State<Db>, id: i64) {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    delete_named_channel_conn(&conn, id);
+}
+
+// --- Message templates (Messaging's own "Not built yet" gap, half 2) --
+// preset quick-messages an operator can save once and fill into any
+// compose box, instead of retyping the same SITREP request or status
+// line every time.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageTemplate {
+    pub id: i64,
+    pub label: String,
+    pub body: String,
+    pub updated_at: String,
+}
+
+pub fn get_message_templates_conn(conn: &Connection) -> Vec<MessageTemplate> {
+    let mut stmt = conn
+        .prepare("SELECT id, label, body, updated_at FROM message_templates ORDER BY label ASC")
+        .expect("failed to prepare message_templates query");
+    stmt.query_map([], |row| {
+        Ok(MessageTemplate { id: row.get(0)?, label: row.get(1)?, body: row.get(2)?, updated_at: row.get(3)? })
+    })
+    .expect("failed to query message_templates")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+#[tauri::command]
+pub fn get_message_templates(db: State<Db>) -> Vec<MessageTemplate> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_message_templates_conn(&conn)
+}
+
+pub fn upsert_message_template_conn(conn: &Connection, id: Option<i64>, label: String, body: String) -> Result<MessageTemplate, String> {
+    if label.trim().is_empty() {
+        return Err("a template needs a real label".to_string());
+    }
+    if body.trim().is_empty() {
+        return Err("a template needs real body text".to_string());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = match id {
+        Some(existing_id) => {
+            conn.execute(
+                "UPDATE message_templates SET label = ?1, body = ?2, updated_at = ?3 WHERE id = ?4",
+                params![label, body, now, existing_id],
+            )
+            .map_err(|e| e.to_string())?;
+            existing_id
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO message_templates (label, body, updated_at) VALUES (?1, ?2, ?3)",
+                params![label, body, now],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.last_insert_rowid()
+        }
+    };
+    Ok(MessageTemplate { id, label, body, updated_at: now })
+}
+
+#[tauri::command]
+pub fn upsert_message_template(db: State<Db>, id: Option<i64>, label: String, body: String) -> Result<MessageTemplate, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    upsert_message_template_conn(&conn, id, label, body)
+}
+
+pub fn delete_message_template_conn(conn: &Connection, id: i64) {
+    conn.execute("DELETE FROM message_templates WHERE id = ?1", params![id])
+        .expect("failed to delete message_template");
+}
+
+#[tauri::command]
+pub fn delete_message_template(db: State<Db>, id: i64) {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    delete_message_template_conn(&conn, id);
+}
+
+#[cfg(test)]
+mod named_channel_and_template_tests {
+    use super::*;
+
+    fn fresh_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("failed to open in-memory db");
+        migrate(&mut conn);
+        conn
+    }
+
+    #[test]
+    fn upsert_named_channel_rejects_an_empty_name() {
+        let conn = fresh_db();
+        let err = upsert_named_channel_conn(&conn, None, "   ".to_string(), Some(2), None, None, None).unwrap_err();
+        assert!(err.contains("real name"));
+    }
+
+    #[test]
+    fn upsert_named_channel_rejects_an_out_of_range_meshtastic_channel() {
+        let conn = fresh_db();
+        let err = upsert_named_channel_conn(&conn, None, "Field Team Alpha".to_string(), Some(8), None, None, None).unwrap_err();
+        assert!(err.contains("0-7"));
+    }
+
+    #[test]
+    fn upsert_named_channel_round_trips_every_transport_binding() {
+        let conn = fresh_db();
+        let created = upsert_named_channel_conn(
+            &conn,
+            None,
+            "Field Team Alpha".to_string(),
+            Some(3),
+            Some("W1AW".to_string()),
+            Some("W1AW".to_string()),
+            Some("Primary response team".to_string()),
+        )
+        .unwrap();
+        let listed = get_named_channels_conn(&conn);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+        assert_eq!(listed[0].meshtastic_channel, Some(3));
+        assert_eq!(listed[0].winlink_callsign, Some("W1AW".to_string()));
+    }
+
+    #[test]
+    fn upsert_named_channel_with_an_id_updates_in_place_not_as_a_new_row() {
+        let conn = fresh_db();
+        let created = upsert_named_channel_conn(&conn, None, "Pine Ridge Incident".to_string(), Some(1), None, None, None).unwrap();
+        upsert_named_channel_conn(&conn, Some(created.id), "Pine Ridge Incident".to_string(), Some(5), None, None, None).unwrap();
+        let listed = get_named_channels_conn(&conn);
+        assert_eq!(listed.len(), 1, "an update must not insert a second row");
+        assert_eq!(listed[0].meshtastic_channel, Some(5));
+    }
+
+    #[test]
+    fn delete_named_channel_conn_removes_it() {
+        let conn = fresh_db();
+        let created = upsert_named_channel_conn(&conn, None, "Field Team Alpha".to_string(), Some(3), None, None, None).unwrap();
+        delete_named_channel_conn(&conn, created.id);
+        assert_eq!(get_named_channels_conn(&conn).len(), 0);
+    }
+
+    #[test]
+    fn upsert_message_template_rejects_empty_label_or_body() {
+        let conn = fresh_db();
+        assert!(upsert_message_template_conn(&conn, None, "".to_string(), "Status: all clear".to_string()).is_err());
+        assert!(upsert_message_template_conn(&conn, None, "Status Check".to_string(), "  ".to_string()).is_err());
+    }
+
+    #[test]
+    fn upsert_message_template_round_trips_and_lists_alphabetically() {
+        let conn = fresh_db();
+        upsert_message_template_conn(&conn, None, "Status Check".to_string(), "Status: all clear, no action needed.".to_string()).unwrap();
+        upsert_message_template_conn(&conn, None, "Need Resupply".to_string(), "Requesting resupply, see resource request.".to_string()).unwrap();
+        let listed = get_message_templates_conn(&conn);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].label, "Need Resupply", "should list alphabetically by label");
+    }
+
+    #[test]
+    fn delete_message_template_conn_removes_it() {
+        let conn = fresh_db();
+        let created = upsert_message_template_conn(&conn, None, "Status Check".to_string(), "All clear.".to_string()).unwrap();
+        delete_message_template_conn(&conn, created.id);
+        assert_eq!(get_message_templates_conn(&conn).len(), 0);
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Contest {
     pub id: String,
@@ -5623,6 +5897,32 @@ const MIGRATIONS: &[&str] = &[
         body        TEXT NOT NULL,
         created_at  TEXT NOT NULL,
         created_by  TEXT
+    );
+    "#,
+    // v63: Named channels spanning transports + message templates,
+    // closing Messaging's own "Not built yet" gap. Only Meshtastic has a
+    // real numbered-channel concept (0-7, see mesh.rs's `send_mesh_text`)
+    // -- Winlink and JS8Call destinations are already free-text callsigns,
+    // nothing to translate there, so a named channel just optionally
+    // carries a per-transport binding for whichever transports it applies
+    // to; any column can stay NULL for a channel that doesn't use that
+    // transport. Mirrors the existing `channels` (radio frequency
+    // directory) table's own label/upsert/delete shape exactly.
+    r#"
+    CREATE TABLE named_channels (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        name                TEXT NOT NULL,
+        meshtastic_channel  INTEGER,
+        winlink_callsign    TEXT,
+        js8call_callsign    TEXT,
+        notes               TEXT,
+        updated_at          TEXT NOT NULL
+    );
+    CREATE TABLE message_templates (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        label       TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
     );
     "#,
 ];
