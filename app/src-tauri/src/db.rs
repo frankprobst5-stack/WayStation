@@ -5371,6 +5371,22 @@ const MIGRATIONS: &[&str] = &[
         triggered_at TEXT NOT NULL
     );
     "#,
+    // v61: Reference Docs, closing ReferencePanel's own "Not built yet" gap
+    // -- real operator-uploaded documents stored locally (the Field
+    // Library tab only ever searches Citadel's own Kiwix, nothing could be
+    // added to it from here). `filename` is the real name on disk under
+    // this app's own data dir (`reference_docs/`), kept separate from the
+    // operator-facing `title` so a collision-safe generated filename never
+    // has to be shown as the document's own name.
+    r#"
+    CREATE TABLE reference_docs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename   TEXT NOT NULL,
+        title      TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        added_at   TEXT NOT NULL
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation

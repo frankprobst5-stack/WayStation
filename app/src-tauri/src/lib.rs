@@ -24,6 +24,7 @@ mod pota;
 mod pskreporter;
 mod qr_transport;
 mod readiness;
+mod reference_docs;
 mod repeaterbook;
 mod required_software;
 mod resource_status;
@@ -312,6 +313,10 @@ pub fn run() {
             db::set_flight_alert_rule_enabled,
             db::delete_flight_alert_rule,
             db::get_flight_alert_log,
+            reference_docs::get_reference_docs,
+            reference_docs::add_reference_doc,
+            reference_docs::get_reference_doc_path,
+            reference_docs::delete_reference_doc,
             backup::backup_database,
             backup::get_storage_usage,
             backup::delete_storage_file,
