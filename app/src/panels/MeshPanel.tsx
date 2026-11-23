@@ -61,6 +61,12 @@ interface ReceivedManifestSummary {
   received_at: number;
 }
 
+interface PendingFragmentStatus {
+  msg_id: number;
+  total_fragments: number;
+  missing: number[];
+}
+
 const BROADCAST_NODE = 4294967295; // 0xFFFFFFFF
 const CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7];
 const STATUS_POLL_MS = 5000;
@@ -116,7 +122,9 @@ function MeshPanel() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [expandedShorthand, setExpandedShorthand] = useState<Map<number, string>>(new Map());
   const [receivedManifests, setReceivedManifests] = useState<ReceivedManifestSummary[]>([]);
+  const [pendingFragments, setPendingFragments] = useState<PendingFragmentStatus[]>([]);
   const [syncingManifest, setSyncingManifest] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
@@ -136,9 +144,19 @@ function MeshPanel() {
     }
   }
 
+  async function refreshPendingFragments() {
+    try {
+      setPendingFragments(await invoke<PendingFragmentStatus[]>("get_pending_manifest_fragments"));
+    } catch (err) {
+      console.error("get_pending_manifest_fragments failed:", err);
+    }
+  }
+
   async function refreshReceivedManifests() {
     try {
       setReceivedManifests(await invoke<ReceivedManifestSummary[]>("get_received_mesh_manifests"));
+      // A manifest completing also changes which ones are still pending.
+      refreshPendingFragments();
     } catch (err) {
       console.error("get_received_mesh_manifests failed:", err);
     }
@@ -162,12 +180,14 @@ function MeshPanel() {
     refreshMessages();
     refreshStatus();
     refreshReceivedManifests();
+    refreshPendingFragments();
 
     const unlisteners: (() => void)[] = [];
     listen("mesh-nodes-changed", refreshNodes).then((fn) => unlisteners.push(fn));
     listen("mesh-messages-changed", refreshMessages).then((fn) => unlisteners.push(fn));
     listen("mesh-config-complete", refreshNodes).then((fn) => unlisteners.push(fn));
     listen("mesh-manifest-received", refreshReceivedManifests).then((fn) => unlisteners.push(fn));
+    listen("mesh-manifest-fragment-received", refreshPendingFragments).then((fn) => unlisteners.push(fn));
 
     const interval = setInterval(refreshStatus, STATUS_POLL_MS);
     return () => {
@@ -246,6 +266,32 @@ function MeshPanel() {
       await invoke("send_mesh_text", { text, toNode, channel, wantAck: requireAck });
       setText("");
       refreshMessages();
+    } catch (err) {
+      setSendError(String(err));
+    }
+  }
+
+  async function toggleExpandShorthand(id: number, text: string) {
+    if (expandedShorthand.has(id)) {
+      setExpandedShorthand((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+    try {
+      const expanded = await invoke<string>("expand_tactical_shorthand", { text });
+      setExpandedShorthand((prev) => new Map(prev).set(id, expanded));
+    } catch (err) {
+      console.error("expand_tactical_shorthand failed:", err);
+    }
+  }
+
+  async function compressDraft() {
+    if (!text.trim()) return;
+    try {
+      setText(await invoke<string>("compress_tactical_shorthand", { text }));
     } catch (err) {
       setSendError(String(err));
     }
@@ -537,13 +583,21 @@ function MeshPanel() {
                       <button
                         type="button"
                         className="mesh-message-delete"
+                        title="Expand any tactical shorthand (ETA, MEDEVAC, CP, ...) in this message"
+                        onClick={() => toggleExpandShorthand(m.id, m.text)}
+                      >
+                        {expandedShorthand.has(m.id) ? "abc" : "ETA"}
+                      </button>
+                      <button
+                        type="button"
+                        className="mesh-message-delete"
                         title="Delete this message"
                         onClick={() => deleteMessage(m.id)}
                       >
                         ✕
                       </button>
                     </div>
-                    <div className="mesh-message-text">{m.text}</div>
+                    <div className="mesh-message-text">{expandedShorthand.get(m.id) ?? m.text}</div>
                     {sender && (sender.short_name || sender.snr !== null) && (
                       <div className="mesh-message-sender-chip">
                         {sender.short_name && <span>{sender.short_name}</span>}
@@ -584,6 +638,15 @@ function MeshPanel() {
               <input type="checkbox" checked={requireAck} onChange={(e) => setRequireAck(e.currentTarget.checked)} />
               Require Ack
             </label>
+            <button
+              type="button"
+              className="mesh-pill"
+              onClick={compressDraft}
+              disabled={!text.trim()}
+              title="Shorten with standard tactical shorthand (ETA, MEDEVAC, CP, ...) before sending -- fewer bytes, fewer WSP/2 fragments over mesh"
+            >
+              Shorthand
+            </button>
             <button type="submit" className="mesh-pill" disabled={!status?.connected}>
               Send
             </button>
@@ -630,6 +693,30 @@ function MeshPanel() {
               </div>
             )}
           </div>
+
+          {pendingFragments.length > 0 && (
+            <div className="mesh-rail-section">
+              <div className="sw-label">Incomplete Manifests (WSP/2)</div>
+              <div className="mesh-participant-list">
+                {pendingFragments.map((p) => (
+                  <div key={p.msg_id} className="mesh-participant-row">
+                    <div className="mesh-participant-body">
+                      <div className="mesh-participant-name-row">
+                        <span className="resource-label">
+                          {p.total_fragments - p.missing.length}/{p.total_fragments} fragments
+                        </span>
+                      </div>
+                      <div className="resource-tokens">
+                        <span className="resource-chip">
+                          Waiting on #{p.missing.join(", #")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mesh-rail-section">
             <div className="sw-label">Received Manifests (WSP/2)</div>

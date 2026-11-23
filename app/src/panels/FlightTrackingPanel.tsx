@@ -25,10 +25,45 @@ interface AircraftTrack {
   last_contact: number;
 }
 
+// Mirrors db::AircraftTrackPoint.
+interface AircraftTrackPoint {
+  icao24: string;
+  latitude: number;
+  longitude: number;
+  recorded_at: number;
+}
+
 const DEFAULT_CENTER: [number, number] = [-98.5, 39.8]; // CONUS center, until the station's own grid re-centers it
 const DEFAULT_ZOOM = 5;
 const AIRCRAFT_COLOR = "#ffffff";
 const ON_GROUND_COLOR = "#8a8d80";
+
+const TRAIL_SOURCE_ID = "aircraft-trails";
+const TRAIL_LAYER_ID = "aircraft-trails-line";
+
+/** One LineString per aircraft, oldest-to-newest -- the backend already
+ * caps each aircraft's history to a bounded trail length and drops it
+ * entirely once that aircraft leaves view, so this just groups and
+ * orders what it's given rather than re-deriving either policy. */
+function trailsToGeoJson(points: AircraftTrackPoint[]): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  const byIcao = new Map<string, AircraftTrackPoint[]>();
+  for (const p of points) {
+    const list = byIcao.get(p.icao24);
+    if (list) list.push(p);
+    else byIcao.set(p.icao24, [p]);
+  }
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  for (const [icao24, pts] of byIcao) {
+    if (pts.length < 2) continue;
+    const ordered = [...pts].sort((a, b) => a.recorded_at - b.recorded_at);
+    features.push({
+      type: "Feature",
+      properties: { icao24 },
+      geometry: { type: "LineString", coordinates: ordered.map((p) => [p.longitude, p.latitude]) },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
 
 const TABS = ["Overview", "Aircraft List", "Filters", "Statistics", "Alerts"] as const;
 type Tab = (typeof TABS)[number];
@@ -129,7 +164,16 @@ function FlightMap({ tracks, onSelect }: { tracks: AircraftTrack[]; onSelect: (t
 
       const map = new maplibregl.Map({ container: containerRef.current, style, center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
       mapRef.current = map;
-      map.on("load", () => setReady(true));
+      map.on("load", () => {
+        map.addSource(TRAIL_SOURCE_ID, { type: "geojson", data: trailsToGeoJson([]) });
+        map.addLayer({
+          id: TRAIL_LAYER_ID,
+          type: "line",
+          source: TRAIL_SOURCE_ID,
+          paint: { "line-color": AIRCRAFT_COLOR, "line-width": 1.5, "line-opacity": 0.45 },
+        });
+        setReady(true);
+      });
       map.on("error", () => {
         setMapError(
           useLocal
@@ -175,6 +219,36 @@ function FlightMap({ tracks, onSelect }: { tracks: AircraftTrack[]; onSelect: (t
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tracks, ready]);
+
+  // Trail history polls on its own (same "aircraft-tracks-changed" event the
+  // parent's `tracks` refresh listens for, since both come from the same
+  // flight_tracking::poll_once() cycle) rather than being derived from the
+  // `tracks` prop, which only ever holds the latest snapshot.
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+
+    async function refreshTrails() {
+      try {
+        const points = await invoke<AircraftTrackPoint[]>("get_aircraft_track_history");
+        if (cancelled) return;
+        const source = mapRef.current?.getSource(TRAIL_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+        source?.setData(trailsToGeoJson(points));
+      } catch (err) {
+        console.error("get_aircraft_track_history failed:", err);
+      }
+    }
+
+    refreshTrails();
+    let unlisten: (() => void) | undefined;
+    listen("aircraft-tracks-changed", refreshTrails).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [ready]);
 
   return (
     <div>

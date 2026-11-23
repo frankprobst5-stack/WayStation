@@ -229,6 +229,15 @@ struct PartialMessage {
     chunks: Vec<Option<Vec<u8>>>,
 }
 
+/// One in-flight manifest's fragment status, as surfaced to the Mesh
+/// panel (see `Reassembler::pending_summaries`).
+#[derive(serde::Serialize)]
+pub struct PendingFragmentStatus {
+    pub msg_id: u32,
+    pub total_fragments: u8,
+    pub missing: Vec<u8>,
+}
+
 /// Tracks in-progress fragmented payloads by `msg_id`, across possibly
 /// out-of-order delivery. Deliberately does not implement retransmission
 /// itself -- see `WSP-2.md`'s "Acknowledgement" section: that's the
@@ -289,14 +298,16 @@ impl Reassembler {
     }
 
     /// Which fragment indices are still outstanding for a `msg_id` that
-    /// has at least one fragment received but isn't complete yet -- what
-    /// a real retransmission request would ask for. `None` if this
-    /// `msg_id` is unknown (nothing received yet, or already completed).
-    /// Not called from `mesh.rs` yet: `sync_manifest_over_mesh` currently
-    /// relies on the firmware's own per-packet ack/retry (`want_ack`) for
-    /// reliability rather than driving fragment-specific retransmission
-    /// itself -- real, named follow-on, not an oversight.
-    #[allow(dead_code)]
+    /// has at least one fragment received but isn't complete yet. `None`
+    /// if this `msg_id` is unknown (nothing received yet, or already
+    /// completed). Now called from `mesh.rs` via `pending_summaries()`
+    /// below, for operator visibility into a stalled transfer -- this
+    /// still doesn't drive retransmission itself (`sync_manifest_over_mesh`
+    /// still relies on the firmware's own per-packet ack/retry for that);
+    /// an operator seeing "stuck on fragment 2 of 5" is what this is for,
+    /// a real fragment-specific retransmission *request* protocol stays a
+    /// separate, bigger follow-on if firmware-level retry alone ever
+    /// proves insufficient.
     pub fn missing_fragments(&self, msg_id: u32) -> Option<Vec<u8>> {
         let entry = self.partial.get(&msg_id)?;
         Some(
@@ -308,6 +319,20 @@ impl Reassembler {
                 .map(|(i, _)| i as u8)
                 .collect(),
         )
+    }
+
+    /// Every manifest currently mid-flight, for the Mesh panel's "Incomplete
+    /// Manifests" section -- the actual use `missing_fragments` was built
+    /// for but never wired up to.
+    pub fn pending_summaries(&self) -> Vec<PendingFragmentStatus> {
+        self.partial
+            .keys()
+            .map(|&msg_id| PendingFragmentStatus {
+                msg_id,
+                total_fragments: self.partial[&msg_id].total,
+                missing: self.missing_fragments(msg_id).unwrap_or_default(),
+            })
+            .collect()
     }
 }
 
@@ -484,5 +509,31 @@ mod tests {
     fn unknown_msg_id_reports_no_missing_fragments() {
         let reassembler = Reassembler::new();
         assert_eq!(reassembler.missing_fragments(12345), None);
+    }
+
+    #[test]
+    fn pending_summaries_reports_every_in_flight_message_and_nothing_else() {
+        let payload_a: Vec<u8> = (0..900u32).map(|i| (i % 256) as u8).collect();
+        let payload_b: Vec<u8> = (0..400u32).map(|i| (i % 256) as u8).collect();
+        let frames_a = fragment(&payload_a, 5).expect("fragment");
+        let frames_b = fragment(&payload_b, 9).expect("fragment");
+        assert!(frames_a.len() >= 3 && frames_b.len() >= 2, "test needs real multi-fragment messages");
+
+        let mut reassembler = Reassembler::new();
+        // msg_id 5: everything but index 1. msg_id 9: fully complete.
+        for (i, frame) in frames_a.iter().enumerate() {
+            if i != 1 {
+                reassembler.add_fragment(frame).expect("add_fragment");
+            }
+        }
+        for frame in &frames_b {
+            reassembler.add_fragment(frame).expect("add_fragment");
+        }
+
+        let pending = reassembler.pending_summaries();
+        assert_eq!(pending.len(), 1, "msg_id 9 completed and must not still show as pending");
+        assert_eq!(pending[0].msg_id, 5);
+        assert_eq!(pending[0].total_fragments, frames_a.len() as u8);
+        assert_eq!(pending[0].missing, vec![1]);
     }
 }

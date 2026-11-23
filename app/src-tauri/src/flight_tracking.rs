@@ -154,6 +154,7 @@ pub fn poll_once(app: &AppHandle) {
                 let db = app.state::<Db>();
                 let mut conn = db.0.lock().expect("db mutex poisoned");
                 db::replace_aircraft_tracks(&mut conn, SOURCE_ID, &fetched_at, &tracks);
+                db::append_aircraft_track_history(&mut conn, &tracks, Utc::now().timestamp());
                 connectivity::report_source_health(&conn, SOURCE_ID, SOURCE_LABEL, Status::Healthy, Via::Internet, None);
             }
             let _ = app.emit("aircraft-tracks-changed", ());

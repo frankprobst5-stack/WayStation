@@ -3257,6 +3257,84 @@ pub fn replace_aircraft_tracks(conn: &mut Connection, source: &str, fetched_at: 
     tx.commit().expect("failed to commit aircraft_tracks transaction");
 }
 
+/// How many recent points each aircraft's trail keeps -- enough to show
+/// real recent movement on the map without the table growing unbounded
+/// for an aircraft that's been in range for hours.
+const MAX_TRAIL_POINTS_PER_AIRCRAFT: i64 = 20;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AircraftTrackPoint {
+    pub icao24: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub recorded_at: i64,
+}
+
+/// Appends one history point per aircraft that has a known position in
+/// this fetch, and prunes: per-aircraft to the most recent
+/// `MAX_TRAIL_POINTS_PER_AIRCRAFT`, and entirely for any `icao24` not
+/// present in this fetch at all -- it's left range/view, so its trail
+/// has done its job (showing where it recently was), not something
+/// worth accumulating forever. Separate table from `aircraft_tracks`
+/// (migration v57's own comment explains why), so this runs alongside
+/// `replace_aircraft_tracks`, not instead of it.
+pub fn append_aircraft_track_history(conn: &mut Connection, tracks: &[IncomingAircraftTrack], recorded_at: i64) {
+    let tx = conn.transaction().expect("failed to start aircraft_track_history transaction");
+    {
+        let current: Vec<&str> = tracks.iter().map(|t| t.icao24.as_str()).collect();
+        if current.is_empty() {
+            tx.execute("DELETE FROM aircraft_track_history", [])
+                .expect("failed to clear aircraft_track_history with nothing currently in view");
+        } else {
+            let placeholders = current.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!("DELETE FROM aircraft_track_history WHERE icao24 NOT IN ({placeholders})");
+            let params: Vec<&dyn rusqlite::ToSql> = current.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            tx.execute(&sql, params.as_slice()).expect("failed to prune aircraft_track_history for aircraft no longer in view");
+        }
+
+        for t in tracks {
+            let (Some(lat), Some(lon)) = (t.latitude, t.longitude) else { continue };
+            tx.execute(
+                "INSERT INTO aircraft_track_history (icao24, latitude, longitude, recorded_at) VALUES (?1, ?2, ?3, ?4)",
+                params![t.icao24, lat, lon, recorded_at],
+            )
+            .expect("failed to insert aircraft_track_history point");
+
+            tx.execute(
+                "DELETE FROM aircraft_track_history WHERE icao24 = ?1 AND id NOT IN (
+                    SELECT id FROM aircraft_track_history WHERE icao24 = ?1 ORDER BY recorded_at DESC LIMIT ?2
+                )",
+                params![t.icao24, MAX_TRAIL_POINTS_PER_AIRCRAFT],
+            )
+            .expect("failed to cap aircraft_track_history trail length");
+        }
+    }
+    tx.commit().expect("failed to commit aircraft_track_history transaction");
+}
+
+fn get_aircraft_track_history_conn(conn: &Connection) -> Vec<AircraftTrackPoint> {
+    let mut stmt = conn
+        .prepare("SELECT icao24, latitude, longitude, recorded_at FROM aircraft_track_history ORDER BY icao24, recorded_at ASC")
+        .expect("failed to prepare aircraft_track_history query");
+    stmt.query_map([], |row| {
+        Ok(AircraftTrackPoint {
+            icao24: row.get(0)?,
+            latitude: row.get(1)?,
+            longitude: row.get(2)?,
+            recorded_at: row.get(3)?,
+        })
+    })
+    .expect("failed to query aircraft_track_history")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+#[tauri::command]
+pub fn get_aircraft_track_history(db: State<Db>) -> Vec<AircraftTrackPoint> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_aircraft_track_history_conn(&conn)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ForecastPeriod {
     pub id: i64,
@@ -4919,6 +4997,27 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE station_profile ADD COLUMN packet_enabled INTEGER NOT NULL DEFAULT 1;
     "#,
+    // v57: aircraft_track_history, closing the real v2 backlog item
+    // "Just a white pin" left open -- the icon-rotation half shipped
+    // 2026-09-24, the trailing flight-path line didn't, because
+    // aircraft_tracks (migration v40) is a replace-on-fetch live
+    // snapshot (correct for "where is it right now," wrong for "where
+    // has it been"), with no position history per icao24 to draw a
+    // trail from. A separate, append-only table, not a repurposed
+    // aircraft_tracks, for exactly that reason -- the two tables answer
+    // different questions and migration v40's own comment is explicit
+    // that a stale position there is misleading, not history worth
+    // keeping.
+    r#"
+    CREATE TABLE aircraft_track_history (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        icao24      TEXT NOT NULL,
+        latitude    REAL NOT NULL,
+        longitude   REAL NOT NULL,
+        recorded_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_aircraft_track_history_icao24 ON aircraft_track_history(icao24);
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -5869,5 +5968,68 @@ mod tests {
         set_trusted_peer_auto_sync_conn(&conn, peer.id, true);
         add_trusted_peer_conn(&conn, "K7WSP".to_string(), "new-secret".to_string(), None).unwrap();
         assert!(get_trusted_peers_conn(&conn)[0].auto_sync, "rotating a peer's secret must not silently turn auto-sync back off");
+    }
+
+    fn sample_track(icao24: &str, lat: f64, lon: f64) -> IncomingAircraftTrack {
+        IncomingAircraftTrack {
+            icao24: icao24.to_string(),
+            callsign: None,
+            origin_country: None,
+            latitude: Some(lat),
+            longitude: Some(lon),
+            altitude_m: None,
+            on_ground: false,
+            velocity_ms: None,
+            true_track: None,
+            vertical_rate_ms: None,
+            squawk: None,
+            last_contact: 0,
+        }
+    }
+
+    #[test]
+    fn aircraft_track_history_accumulates_a_real_trail_across_polls() {
+        let mut conn = fresh_db();
+        append_aircraft_track_history(&mut conn, &[sample_track("a1b2c3", 35.0, -101.0)], 1_000);
+        append_aircraft_track_history(&mut conn, &[sample_track("a1b2c3", 35.1, -101.1)], 1_060);
+        append_aircraft_track_history(&mut conn, &[sample_track("a1b2c3", 35.2, -101.2)], 1_120);
+
+        let history: Vec<AircraftTrackPoint> =
+            get_aircraft_track_history_conn(&conn).into_iter().filter(|p| p.icao24 == "a1b2c3").collect();
+        assert_eq!(history.len(), 3, "each poll with a known position should add one point, not replace the last one");
+        assert_eq!(history[0].recorded_at, 1_000, "oldest point first");
+        assert_eq!(history[2].latitude, 35.2);
+    }
+
+    #[test]
+    fn aircraft_track_history_caps_the_trail_length_per_aircraft() {
+        let mut conn = fresh_db();
+        for i in 0..(MAX_TRAIL_POINTS_PER_AIRCRAFT + 5) {
+            append_aircraft_track_history(&mut conn, &[sample_track("a1b2c3", 35.0 + i as f64 * 0.01, -101.0)], 1_000 + i);
+        }
+        let history: Vec<AircraftTrackPoint> =
+            get_aircraft_track_history_conn(&conn).into_iter().filter(|p| p.icao24 == "a1b2c3").collect();
+        assert_eq!(history.len(), MAX_TRAIL_POINTS_PER_AIRCRAFT as usize, "trail must stay capped, not grow unbounded");
+        // The oldest 5 points must be the ones pruned, not the newest.
+        assert_eq!(history.first().unwrap().recorded_at, 1_005);
+    }
+
+    #[test]
+    fn aircraft_track_history_drops_a_trail_once_its_aircraft_leaves_view() {
+        let mut conn = fresh_db();
+        append_aircraft_track_history(&mut conn, &[sample_track("a1b2c3", 35.0, -101.0)], 1_000);
+        append_aircraft_track_history(&mut conn, &[sample_track("d4e5f6", 36.0, -102.0)], 1_060); // a1b2c3 not in this fetch
+        let remaining = get_aircraft_track_history_conn(&conn);
+        assert!(remaining.iter().all(|p| p.icao24 == "d4e5f6"), "a1b2c3 left view and its trail should be gone, not kept forever");
+    }
+
+    #[test]
+    fn aircraft_track_history_skips_points_with_no_known_position() {
+        let mut conn = fresh_db();
+        let mut no_position = sample_track("a1b2c3", 0.0, 0.0);
+        no_position.latitude = None;
+        no_position.longitude = None;
+        append_aircraft_track_history(&mut conn, &[no_position], 1_000);
+        assert!(get_aircraft_track_history_conn(&conn).is_empty(), "no lat/lon means nothing real to plot a trail point from");
     }
 }

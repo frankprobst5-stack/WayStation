@@ -319,7 +319,14 @@ fn handle_mesh_packet(app: &AppHandle, packet: MeshPacket) {
                         }
                     }
                 }
-                Ok(None) => {} // still waiting on more fragments for this msg_id
+                Ok(None) => {
+                    // Still waiting on more fragments for this msg_id --
+                    // real progress worth showing live, not just on the
+                    // next 5s status poll, since a transfer can stall
+                    // for longer than that and an operator watching the
+                    // panel should see it update as fragments trickle in.
+                    let _ = app.emit("mesh-manifest-fragment-received", ());
+                }
                 Err(e) => eprintln!("wsp2: failed to add a received mesh fragment: {e}"),
             }
         }
@@ -615,6 +622,17 @@ pub fn sync_manifest_over_mesh(mesh_state: State<MeshState>, db: State<Db>, to_n
 #[tauri::command]
 pub fn get_received_mesh_manifests(mesh_state: State<MeshState>) -> Vec<ReceivedManifestSummary> {
     mesh_state.received_manifests.lock().expect("mesh state mutex poisoned").clone()
+}
+
+/// Manifests still mid-transfer -- at least one fragment received, not
+/// yet complete. Wires `wsp2::Reassembler::missing_fragments` up to
+/// something an operator can actually see, closing the real, named gap
+/// WSP-2.md's own doc flagged: this is visibility into a stalled
+/// transfer, not a retransmission protocol (still none here; see
+/// `pending_summaries`'s own doc).
+#[tauri::command]
+pub fn get_pending_manifest_fragments(mesh_state: State<MeshState>) -> Vec<wsp2::PendingFragmentStatus> {
+    mesh_state.manifest_reassembler.lock().expect("mesh state mutex poisoned").pending_summaries()
 }
 
 /// Broadcasts this station's fixed QTH, derived from the grid square in

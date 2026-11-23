@@ -32,6 +32,7 @@ mod space_weather;
 mod spc_outlook;
 mod sync;
 mod system_health;
+mod tactical_shorthand;
 mod transcription;
 mod transport;
 mod weather_station;
@@ -245,6 +246,7 @@ pub fn run() {
             db::get_pota_spots,
             db::get_dx_spots,
             db::get_aircraft_tracks,
+            db::get_aircraft_track_history,
             db::get_forecast_periods,
             db::get_spc_outlook,
             db::get_nws_current_observation,
@@ -265,6 +267,9 @@ pub fn run() {
             mesh::reconnect_mesh,
             mesh::sync_manifest_over_mesh,
             mesh::get_received_mesh_manifests,
+            mesh::get_pending_manifest_fragments,
+            tactical_shorthand::compress_tactical_shorthand,
+            tactical_shorthand::expand_tactical_shorthand,
             rig::get_rig_status,
             rig::set_rig_frequency,
             rig::set_rig_mode,
