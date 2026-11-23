@@ -140,6 +140,11 @@ pub struct StationProfile {
     /// this also stops Direwolf if an operator had it running; its own
     /// setter (`direwolf::set_packet_enabled`) is not a plain DB write.
     pub packet_enabled: bool,
+    /// Whether the ATAK/CoT UDP multicast listener should even bind.
+    /// DEFAULT 0 (see migration v58's own comment) -- unlike every other
+    /// module flag above, this one starts off, not on, since it's a new
+    /// network listener nothing asked for until an operator opts in.
+    pub cot_enabled: bool,
     pub updated_at: Option<String>,
 }
 
@@ -179,6 +184,7 @@ impl Default for StationProfile {
             winlink_enabled: true,
             js8call_enabled: true,
             packet_enabled: true,
+            cot_enabled: false,
             updated_at: None,
         }
     }
@@ -186,7 +192,7 @@ impl Default for StationProfile {
 
 pub fn station_profile(conn: &Connection) -> StationProfile {
     conn.query_row(
-        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, winlink_enabled, js8call_enabled, packet_enabled, updated_at FROM station_profile WHERE id = 1",
+        "SELECT callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, manual_offline, rig_enabled, rotctld_host, rotator_enabled, tactical_mode, citadel_map_host, signing_secret, theme, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, citadel_vault_token, mesh_enabled, winlink_enabled, js8call_enabled, packet_enabled, cot_enabled, updated_at FROM station_profile WHERE id = 1",
         [],
         |row| {
             Ok(StationProfile {
@@ -213,7 +219,8 @@ pub fn station_profile(conn: &Connection) -> StationProfile {
                 winlink_enabled: row.get::<_, i64>(20)? != 0,
                 js8call_enabled: row.get::<_, i64>(21)? != 0,
                 packet_enabled: row.get::<_, i64>(22)? != 0,
-                updated_at: row.get(23)?,
+                cot_enabled: row.get::<_, i64>(23)? != 0,
+                updated_at: row.get(24)?,
             })
         },
     )
@@ -330,6 +337,32 @@ pub fn set_js8call_enabled(db: State<Db>, enabled: bool) -> StationProfile {
             params![enabled as i64, now],
         )
         .expect("failed to create station_profile for js8call_enabled");
+    }
+    station_profile(&conn)
+}
+
+/// Same reasoning and shape as `set_mesh_enabled`/`set_js8call_enabled` --
+/// `cot.rs`'s listener thread is a plain live-checked flag with nothing to
+/// actually stop when off, same as those two.
+#[tauri::command]
+pub fn set_cot_enabled(db: State<Db>, enabled: bool) -> StationProfile {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE station_profile SET cot_enabled = ?1, updated_at = ?2 WHERE id = 1",
+        params![enabled as i64, now],
+    )
+    .expect("failed to update cot_enabled");
+    if conn
+        .query_row("SELECT COUNT(*) FROM station_profile WHERE id = 1", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
+        == 0
+    {
+        conn.execute(
+            "INSERT INTO station_profile (id, cot_enabled, updated_at) VALUES (1, ?1, ?2)",
+            params![enabled as i64, now],
+        )
+        .expect("failed to create station_profile for cot_enabled");
     }
     station_profile(&conn)
 }
@@ -477,6 +510,7 @@ fn save_station_profile_conn(
     let winlink_enabled = existing.winlink_enabled;
     let js8call_enabled = existing.js8call_enabled;
     let packet_enabled = existing.packet_enabled;
+    let cot_enabled = existing.cot_enabled;
     conn.execute(
         "INSERT INTO station_profile (id, callsign, grid_square, operator_name, repeaterbook_token, mesh_host, rigctld_host, rig_enabled, rotctld_host, rotator_enabled, citadel_map_host, citadel_vault_token, local_weather_brand, local_weather_host, citadel_kiwix_host, direwolf_audio_device, updated_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
@@ -525,6 +559,7 @@ fn save_station_profile_conn(
         winlink_enabled,
         js8call_enabled,
         packet_enabled,
+        cot_enabled,
         updated_at: Some(now),
     }
 }
@@ -3776,9 +3811,13 @@ pub struct MeshNode {
     pub position_updated_at: Option<i64>,
 }
 
-#[tauri::command]
-pub fn get_mesh_nodes(db: State<Db>) -> Vec<MeshNode> {
-    let conn = db.0.lock().expect("db mutex poisoned");
+/// Split out so `cot.rs`'s own `broadcast_cot_snapshot` (already holding
+/// a locked `Connection` to read the station profile and markers in the
+/// same pass) can read live mesh node positions without a second,
+/// deadlocking `db.0.lock()` -- same established `_conn`-plus-thin-
+/// command-wrapper split this file already uses elsewhere (e.g.
+/// `get_aircraft_track_history_conn`).
+pub fn get_mesh_nodes_conn(conn: &Connection) -> Vec<MeshNode> {
     let mut stmt = conn
         .prepare(
             "SELECT node_num, user_id, long_name, short_name, hw_model, snr, last_heard, battery_pct, is_favorite, updated_at,
@@ -3806,6 +3845,12 @@ pub fn get_mesh_nodes(db: State<Db>) -> Vec<MeshNode> {
     .expect("failed to query mesh_nodes")
     .filter_map(Result::ok)
     .collect()
+}
+
+#[tauri::command]
+pub fn get_mesh_nodes(db: State<Db>) -> Vec<MeshNode> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_mesh_nodes_conn(&conn)
 }
 
 /// Updates only a node's position, independent of `upsert_mesh_node`'s
@@ -5017,6 +5062,30 @@ const MIGRATIONS: &[&str] = &[
         recorded_at INTEGER NOT NULL
     );
     CREATE INDEX idx_aircraft_track_history_icao24 ON aircraft_track_history(icao24);
+    "#,
+    // v58: ATAK/CoT interoperability, closing the real "reach" gap the
+    // XTOC comparison named -- ATAK has wide real-world adoption in the
+    // same SAR/prepper/EmComm world WayStation targets, and CoT lets this
+    // station exchange position data with it directly over its own real,
+    // documented default UDP multicast (no server, no WayStation-specific
+    // app on the other end). `cot_enabled` DEFAULT 0, not 1 like the other
+    // modules' migrations -- this opens a new network listener nothing
+    // asked for yet, so it starts opt-in rather than on by default the
+    // way an already-trusted existing transport would.  `cot_contacts`
+    // mirrors `aprs_stations`' own real shape: keyed by CoT's own `uid`
+    // (the protocol's actual identity field, not callsign, since a CoT
+    // producer isn't required to send one), replace-on-heard.
+    r#"
+    ALTER TABLE station_profile ADD COLUMN cot_enabled INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE cot_contacts (
+        uid       TEXT PRIMARY KEY,
+        callsign  TEXT NOT NULL,
+        cot_type  TEXT NOT NULL,
+        lat       REAL NOT NULL,
+        lon       REAL NOT NULL,
+        stale_at  TEXT NOT NULL,
+        heard_at  TEXT NOT NULL
+    );
     "#,
 ];
 

@@ -5,6 +5,7 @@ mod backup;
 mod citadel_scanner;
 mod connectivity;
 mod contest_calendar;
+mod cot;
 mod db;
 mod discovery;
 mod direwolf;
@@ -132,6 +133,7 @@ pub fn run() {
             flight_tracking::spawn_poller(app.handle().clone());
             satellite::spawn_poller(app.handle().clone());
             mesh::spawn_poller(app.handle().clone());
+            cot::spawn_listener(app.handle().clone());
             pat::spawn_or_restart(app.handle());
             pat::spawn_health_poller(app.handle().clone());
             // Deliberately no direwolf::start_direwolf(...) call here --
@@ -169,6 +171,9 @@ pub fn run() {
             db::set_rotator_enabled,
             db::set_js8call_enabled,
             direwolf::set_packet_enabled,
+            db::set_cot_enabled,
+            cot::get_cot_contacts,
+            cot::broadcast_cot_snapshot,
             db::set_theme,
             db::get_traffic_counts,
             db::get_recent_activity,

@@ -7,6 +7,7 @@ import WinlinkPanel from "./WinlinkPanel";
 import Js8CallPanel from "./Js8CallPanel";
 import PacketPanel from "./PacketPanel";
 import QrTransportPanel from "./QrTransportPanel";
+import CotPanel from "./CotPanel";
 
 // Consolidates six panels that used to each show up as their own separate
 // stacked tile under the "messaging" sidebar category into one tabbed
@@ -20,7 +21,7 @@ import QrTransportPanel from "./QrTransportPanel";
 // not "Pine Ridge Incident" or "Field Team Alpha"), and message templates
 // / preset quick-messages (no template storage anywhere in the backend).
 
-const TABS = ["Overview", "Mesh (Meshtastic)", "Messages (ICS-213/309)", "Net Control", "Winlink", "JS8Call", "Packet (APRS/Direwolf)", "QR Code"] as const;
+const TABS = ["Overview", "Mesh (Meshtastic)", "Messages (ICS-213/309)", "Net Control", "Winlink", "JS8Call", "Packet (APRS/Direwolf)", "QR Code", "ATAK/CoT"] as const;
 type Tab = (typeof TABS)[number];
 
 interface MeshStatus { connected: boolean }
@@ -148,6 +149,7 @@ const TAB_MODULE_FIELD: Partial<Record<Tab, keyof StationProfileTransportFields>
   Winlink: "winlink_enabled",
   JS8Call: "js8call_enabled",
   "Packet (APRS/Direwolf)": "packet_enabled",
+  "ATAK/CoT": "cot_enabled",
 };
 
 interface StationProfileTransportFields {
@@ -155,6 +157,7 @@ interface StationProfileTransportFields {
   winlink_enabled: boolean;
   js8call_enabled: boolean;
   packet_enabled: boolean;
+  cot_enabled: boolean;
 }
 
 function MessagingPanel() {
@@ -164,6 +167,10 @@ function MessagingPanel() {
     winlink_enabled: true,
     js8call_enabled: true,
     packet_enabled: true,
+    // Real default is off (see db.rs migration v58) -- this is a new
+    // network listener nothing asked for until an operator opts in via
+    // Settings -> Modules, unlike the other transports above.
+    cot_enabled: false,
   });
 
   useEffect(() => {
@@ -208,6 +215,7 @@ function MessagingPanel() {
         {tab === "JS8Call" && <Js8CallPanel />}
         {tab === "Packet (APRS/Direwolf)" && <PacketPanel />}
         {tab === "QR Code" && <QrTransportPanel />}
+        {tab === "ATAK/CoT" && <CotPanel />}
       </div>
     </div>
   );

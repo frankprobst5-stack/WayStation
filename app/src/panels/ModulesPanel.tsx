@@ -29,6 +29,7 @@ interface StationProfileModuleFields {
   winlink_enabled: boolean;
   js8call_enabled: boolean;
   packet_enabled: boolean;
+  cot_enabled: boolean;
 }
 
 const MODULE_CATALOG: ModuleManifest[] = [
@@ -67,6 +68,16 @@ const MODULE_CATALOG: ModuleManifest[] = [
     requiresHardware: true,
     profileField: "packet_enabled",
     command: "set_packet_enabled",
+  },
+  {
+    id: "cot",
+    title: "ATAK/CoT",
+    icon: "🗺",
+    description:
+      "Position interoperability with ATAK/WinTAK over their own default UDP multicast (239.2.3.1:6969) — no server, no account. Off by default, unlike the others here: this opens a new network listener nothing asked for until you opt in.",
+    requiresHardware: false,
+    profileField: "cot_enabled",
+    command: "set_cot_enabled",
   },
   {
     id: "rig",
