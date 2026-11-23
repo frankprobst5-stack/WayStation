@@ -18,10 +18,23 @@ const DATA_PAYLOAD_LEN: usize = 233;
 const FRAGMENT_HEADER_LEN: usize = 7; // 1 (tag) + 4 (msg_id) + 1 (index) + 1 (total)
 const MAX_FRAGMENT_CHUNK: usize = DATA_PAYLOAD_LEN - FRAGMENT_HEADER_LEN;
 
-use crate::sync::{ManifestEntry, ObjectKind};
+use crate::sync::{ManifestEntry, ObjectKind, WspEnvelope};
 
 pub const WSP2_VERSION: u8 = 2;
-const KIND_MANIFEST: u8 = 0;
+pub const KIND_MANIFEST: u8 = 0;
+/// A request for specific objects by uuid -- the step a station takes
+/// after receiving a peer's manifest and finding it's missing something,
+/// mirroring `net_sync.rs`'s own `ObjectsRequest` message but over this
+/// fragmented transport instead of a TCP socket.
+pub const KIND_OBJECTS_REQUEST: u8 = 1;
+/// The answer to a `KIND_OBJECTS_REQUEST` -- a real `WspEnvelope::Objects`,
+/// the exact same signed envelope shape the file and TCP transports
+/// already produce. Deliberately not a new compact codec: `WSP-2.md`'s own
+/// "Where this fits" section already names the Objects envelope as a
+/// separate, not-yet-built encoding effort, so this wraps the existing
+/// JSON form as an opaque blob through this module's content-agnostic
+/// fragmenter rather than inventing a second one prematurely.
+pub const KIND_OBJECTS: u8 = 2;
 
 fn write_varint(out: &mut Vec<u8>, mut value: u64) {
     loop {
@@ -172,6 +185,74 @@ pub fn decode_manifest(bytes: &[u8]) -> Result<(Option<String>, i64, Vec<Manifes
     }
 
     Ok((origin_callsign, generated_at, entries))
+}
+
+/// Reads a reassembled payload's content kind without fully decoding it
+/// -- lets `mesh.rs`'s receive path dispatch to the right decoder
+/// (`decode_manifest`/`decode_objects_request`/`decode_objects_envelope`)
+/// for one already-defragmented byte stream, the same way a port number
+/// routes a packet to the right handler in `handle_mesh_packet`.
+pub fn payload_kind(bytes: &[u8]) -> Result<u8, String> {
+    let version = *bytes.first().ok_or("empty payload")?;
+    if version != WSP2_VERSION {
+        return Err(format!("unsupported wsp_version {version}, this decoder speaks WSP/2 only"));
+    }
+    bytes.get(1).copied().ok_or_else(|| "truncated payload: missing kind".to_string())
+}
+
+/// Compact uuid-list encoding, same raw-16-bytes-per-uuid shape
+/// `encode_manifest`'s own entries already use -- this is just the
+/// uuid half of a manifest entry, with no kind/revision/hash since a
+/// request doesn't need them.
+pub fn encode_objects_request(uuids: &[String]) -> Result<Vec<u8>, String> {
+    let mut out = vec![WSP2_VERSION, KIND_OBJECTS_REQUEST];
+    if uuids.len() > u16::MAX as usize {
+        return Err("too many requested uuids for a u16 count".to_string());
+    }
+    out.extend_from_slice(&(uuids.len() as u16).to_be_bytes());
+    for uuid in uuids {
+        let parsed = uuid::Uuid::parse_str(uuid).map_err(|e| format!("requested uuid {uuid} is invalid: {e}"))?;
+        out.extend_from_slice(parsed.as_bytes());
+    }
+    Ok(out)
+}
+
+pub fn decode_objects_request(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let kind = payload_kind(bytes)?;
+    if kind != KIND_OBJECTS_REQUEST {
+        return Err(format!("expected objects-request kind ({KIND_OBJECTS_REQUEST}), got {kind}"));
+    }
+    let mut pos = 2usize;
+    let count_bytes: [u8; 2] = bytes.get(pos..pos + 2).ok_or("truncated objects request: count")?.try_into().expect("2 bytes");
+    let count = u16::from_be_bytes(count_bytes) as usize;
+    pos += 2;
+    let mut uuids = Vec::with_capacity(count);
+    for _ in 0..count {
+        let uuid_bytes: [u8; 16] = bytes.get(pos..pos + 16).ok_or("truncated objects request: uuid")?.try_into().expect("16 bytes");
+        pos += 16;
+        uuids.push(uuid::Uuid::from_bytes(uuid_bytes).to_string());
+    }
+    Ok(uuids)
+}
+
+/// Wraps a real `WspEnvelope::Objects` (the same signed envelope the
+/// file and TCP transports already produce via `sync::wrap_objects`) as
+/// an opaque JSON blob behind this module's own version/kind header, so
+/// `fragment`'s content-agnostic chunking carries it exactly like a
+/// manifest, with no separate framing logic needed.
+pub fn encode_objects_envelope(envelope: &WspEnvelope) -> Result<Vec<u8>, String> {
+    let mut out = vec![WSP2_VERSION, KIND_OBJECTS];
+    let json = serde_json::to_vec(envelope).map_err(|e| e.to_string())?;
+    out.extend_from_slice(&json);
+    Ok(out)
+}
+
+pub fn decode_objects_envelope(bytes: &[u8]) -> Result<WspEnvelope, String> {
+    let kind = payload_kind(bytes)?;
+    if kind != KIND_OBJECTS {
+        return Err(format!("expected objects kind ({KIND_OBJECTS}), got {kind}"));
+    }
+    serde_json::from_slice(&bytes[2..]).map_err(|e| e.to_string())
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -535,5 +616,96 @@ mod tests {
         assert_eq!(pending[0].msg_id, 5);
         assert_eq!(pending[0].total_fragments, frames_a.len() as u8);
         assert_eq!(pending[0].missing, vec![1]);
+    }
+
+    #[test]
+    fn payload_kind_reads_each_real_encoded_kind_correctly() {
+        let manifest = encode_manifest(None, 0, &[]).expect("encode");
+        assert_eq!(payload_kind(&manifest), Ok(KIND_MANIFEST));
+
+        let request = encode_objects_request(&["a1b2c3d4-e5f6-4789-a1b2-c3d4e5f67890".to_string()]).expect("encode");
+        assert_eq!(payload_kind(&request), Ok(KIND_OBJECTS_REQUEST));
+    }
+
+    #[test]
+    fn payload_kind_rejects_a_wrong_version_and_an_empty_payload() {
+        assert!(payload_kind(&[]).is_err());
+        assert!(payload_kind(&[99, KIND_MANIFEST]).is_err());
+    }
+
+    #[test]
+    fn objects_request_round_trips_a_real_uuid_list() {
+        let uuids = vec![
+            "a1b2c3d4-e5f6-4789-a1b2-c3d4e5f67890".to_string(),
+            "b2c3d4e5-f6a7-4890-b2c3-d4e5f6a78901".to_string(),
+        ];
+        let encoded = encode_objects_request(&uuids).expect("encode");
+        let decoded = decode_objects_request(&encoded).expect("decode");
+        assert_eq!(decoded, uuids);
+    }
+
+    #[test]
+    fn objects_request_rejects_an_unparseable_uuid() {
+        assert!(encode_objects_request(&["not-a-real-uuid".to_string()]).is_err());
+    }
+
+    #[test]
+    fn decode_objects_request_rejects_a_manifest_payload() {
+        let manifest = encode_manifest(None, 0, &[]).expect("encode");
+        let err = decode_objects_request(&manifest).unwrap_err();
+        assert!(err.contains("expected objects-request kind"));
+    }
+
+    fn sample_objects_envelope() -> WspEnvelope {
+        use crate::db::MapMarker;
+        use crate::sync::SyncObject;
+        WspEnvelope::Objects {
+            wsp_version: crate::sync::WSP_VERSION,
+            origin_callsign: Some("KJ4ESQ".to_string()),
+            generated_at: "2026-11-22T12:00:00Z".to_string(),
+            entries: vec![SyncObject::Marker(MapMarker {
+                id: 1,
+                label: "Staging Area".to_string(),
+                marker_type: "resource".to_string(),
+                latitude: 35.1,
+                longitude: -101.3,
+                origin_station: Some("KJ4ESQ".to_string()),
+                to_station: None,
+                created_at: "2026-11-22T12:00:00Z".to_string(),
+                content_hash: "a-real-looking-hash".to_string(),
+                dispatch_status: "dispatched".to_string(),
+                dispatched_via: Some("mesh".to_string()),
+                received_via: None,
+                uuid: "c3d4e5f6-a7b8-4901-c3d4-e5f6a7b89012".to_string(),
+                revision: 1,
+                updated_at: Some("2026-11-22T12:00:00Z".to_string()),
+                incident_id: None,
+                expires_at: None,
+                trust_state: "local".to_string(),
+                deleted_at: None,
+            })],
+            signature: None,
+        }
+    }
+
+    #[test]
+    fn objects_envelope_round_trips_a_real_marker() {
+        let envelope = sample_objects_envelope();
+        let encoded = encode_objects_envelope(&envelope).expect("encode");
+        assert_eq!(payload_kind(&encoded), Ok(KIND_OBJECTS));
+        let decoded = decode_objects_envelope(&encoded).expect("decode");
+        match (envelope, decoded) {
+            (WspEnvelope::Objects { entries: a, .. }, WspEnvelope::Objects { entries: b, .. }) => {
+                assert_eq!(a.len(), b.len());
+            }
+            _ => panic!("expected both sides to decode as an Objects envelope"),
+        }
+    }
+
+    #[test]
+    fn decode_objects_envelope_rejects_an_objects_request_payload() {
+        let request = encode_objects_request(&[]).expect("encode");
+        let err = decode_objects_envelope(&request).unwrap_err();
+        assert!(err.contains("expected objects kind"));
     }
 }

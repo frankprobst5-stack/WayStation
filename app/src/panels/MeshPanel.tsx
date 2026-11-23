@@ -67,6 +67,16 @@ interface PendingFragmentStatus {
   missing: number[];
 }
 
+// Mirrors mesh::MeshSyncMergeSummary.
+interface MeshSyncMergeSummary {
+  peer_node: number;
+  merged_at: number;
+  inserted: number;
+  updated: number;
+  conflicts: number;
+  signature_status: "unknown_signer" | "unsigned" | "invalid" | "verified";
+}
+
 const BROADCAST_NODE = 4294967295; // 0xFFFFFFFF
 const CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7];
 const STATUS_POLL_MS = 5000;
@@ -125,6 +135,7 @@ function MeshPanel() {
   const [expandedShorthand, setExpandedShorthand] = useState<Map<number, string>>(new Map());
   const [receivedManifests, setReceivedManifests] = useState<ReceivedManifestSummary[]>([]);
   const [pendingFragments, setPendingFragments] = useState<PendingFragmentStatus[]>([]);
+  const [syncMerges, setSyncMerges] = useState<MeshSyncMergeSummary[]>([]);
   const [syncingManifest, setSyncingManifest] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
@@ -162,6 +173,14 @@ function MeshPanel() {
     }
   }
 
+  async function refreshSyncMerges() {
+    try {
+      setSyncMerges(await invoke<MeshSyncMergeSummary[]>("get_mesh_sync_merges"));
+    } catch (err) {
+      console.error("get_mesh_sync_merges failed:", err);
+    }
+  }
+
   async function refreshStatus() {
     // `status` is read everywhere below via `status?.` so a failure
     // leaving it at its last value (or null) doesn't hang any render the
@@ -181,6 +200,7 @@ function MeshPanel() {
     refreshStatus();
     refreshReceivedManifests();
     refreshPendingFragments();
+    refreshSyncMerges();
 
     const unlisteners: (() => void)[] = [];
     listen("mesh-nodes-changed", refreshNodes).then((fn) => unlisteners.push(fn));
@@ -188,6 +208,7 @@ function MeshPanel() {
     listen("mesh-config-complete", refreshNodes).then((fn) => unlisteners.push(fn));
     listen("mesh-manifest-received", refreshReceivedManifests).then((fn) => unlisteners.push(fn));
     listen("mesh-manifest-fragment-received", refreshPendingFragments).then((fn) => unlisteners.push(fn));
+    listen("mesh-sync-merge-completed", refreshSyncMerges).then((fn) => unlisteners.push(fn));
 
     const interval = setInterval(refreshStatus, STATUS_POLL_MS);
     return () => {
@@ -319,13 +340,13 @@ function MeshPanel() {
     setSyncingManifest(true);
     setSyncStatus(null);
     try {
-      // First real wiring of WSP/2 into a live send path: exports this
-      // station's own manifest, encodes it compactly, fragments it to
-      // the real over-the-air ceiling, and sends every fragment as its
-      // own PrivateApp packet -- see WSP-2.md. This only sends; it
-      // doesn't yet request the objects a peer's own reply would say
-      // this station is missing (see mesh.rs's own doc comment on
-      // sync_manifest_over_mesh for the honest, named scope boundary).
+      // Exports this station's own manifest, encodes it compactly,
+      // fragments it to the real over-the-air ceiling, and sends every
+      // fragment as its own PrivateApp packet -- see WSP-2.md. Whoever
+      // receives it now automatically pulls back whatever they're
+      // missing (see mesh.rs's own doc on sync_manifest_over_mesh) --
+      // this button only ever sends in one direction, same as before,
+      // but a reply now follows on its own.
       const fragmentCount = await invoke<number>("sync_manifest_over_mesh", { toNode });
       setSyncStatus(`Sent manifest in ${fragmentCount} fragment${fragmentCount === 1 ? "" : "s"}.`);
     } catch (err) {
@@ -520,7 +541,7 @@ function MeshPanel() {
                 className="mesh-pill mesh-action-button"
                 onClick={syncManifest}
                 disabled={!status?.connected || syncingManifest}
-                title="Send this station's manifest over mesh (WSP/2, see WSP-2.md)"
+                title="Send this station's manifest over mesh -- peers automatically pull back whatever they're missing (WSP/2, see WSP-2.md)"
               >
                 <IconRefresh className="mesh-inline-icon" />
                 {syncingManifest ? "Syncing..." : "Sync Manifest"}
@@ -735,6 +756,35 @@ function MeshPanel() {
                           {m.entry_count} entr{m.entry_count === 1 ? "y" : "ies"}
                         </span>
                         <span className="resource-chip">{relativeTime(m.received_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mesh-rail-section">
+            <div className="sw-label">Sync Merges (WSP/1 over Mesh)</div>
+            {syncMerges.length === 0 ? (
+              <div className="panel-alerts-empty">No objects pulled over mesh yet.</div>
+            ) : (
+              <div className="mesh-participant-list">
+                {[...syncMerges].reverse().map((s, i) => (
+                  <div key={`${s.merged_at}-${i}`} className="mesh-participant-row">
+                    <div className="mesh-participant-body">
+                      <div className="mesh-participant-name-row">
+                        <span className="resource-label">{nodeLabel(s.peer_node)}</span>
+                        <span className={`diag-badge diag-badge-${s.signature_status === "verified" ? "healthy" : s.signature_status === "invalid" ? "down" : "degraded"}`}>
+                          {s.signature_status}
+                        </span>
+                      </div>
+                      <div className="resource-tokens">
+                        {s.inserted > 0 && <span className="resource-chip">{s.inserted} new</span>}
+                        {s.updated > 0 && <span className="resource-chip">{s.updated} updated</span>}
+                        {s.conflicts > 0 && <span className="resource-chip">{s.conflicts} conflict{s.conflicts === 1 ? "" : "s"}</span>}
+                        {s.inserted === 0 && s.updated === 0 && s.conflicts === 0 && <span className="resource-chip">already up to date</span>}
+                        <span className="resource-chip">{relativeTime(s.merged_at)}</span>
                       </div>
                     </div>
                   </div>

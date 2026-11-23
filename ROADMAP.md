@@ -289,24 +289,46 @@ Reconciled 2026-09-03 against a longer external planning list Frank was carrying
   See `WSP-2.md`'s "Acknowledgement" section.
 - ~~**mDNS/DNS-SD local peer discovery**~~ — ✅ done 2026-09-03, see that day's changelog. `discovery.rs`: advertises this station as `_waystation._tcp.local.` (callsign in a TXT record, no live port behind it yet — file exchange is still the only real sync transport), browses for others, surfaces them read-only in `SyncPanel.tsx`. **Discovery only, never automatic sync**, per the second non-negotiable principle above — nothing discovered is clickable to sync, moving data still always means Export/Import.
 - ~~**Automated background sync loop**~~ — ✅ done 2026-09-04, see that day's changelog and [WSP-1.md](WSP-1.md)'s Transports section. `auto_sync.rs` polls every 5 minutes; a peer only ever becomes a real connect target with both an explicit per-peer `auto_sync` opt-in (off by default, even for an already-trusted peer) *and* current presence in mDNS discovery. On-demand "Sync via Network" is unaffected and still available regardless.
-- **WSP/1 sync (manifest/diff/merge) over mesh as its own transport** `[DISCOVERY]`, added
-  2026-09-15, surfaced by planning work on Muster (a new sibling project, a lightweight
-  browser/PWA ops-coordination tool — see its own ROADMAP.md). Real gap, checked directly
-  against [WSP-1.md](WSP-1.md) rather than assumed: WSP/1's actual reconciliation protocol
-  (`export_manifest`/`uuids_needed_from`/`export_objects`/`merge_incoming`) only has two
-  transports today, file exchange and authenticated TCP (`net_sync.rs`) — mesh is not one of
-  them. Meshtastic today only carries the separate outbound `Transport` trait's individual
-  messages/markers, not full database reconciliation between two stations. This matters
-  beyond Muster: it's also the real prerequisite for this document's own "TTL / multi-hop
-  forwarding" gap already named in WSP-1.md's "What's not in WSP/1" section — a station-to-
-  station mesh sync transport is a reasonable first step toward that, not a separate
-  problem. **Real prerequisite now proven, 2026-11-08** — see the WSP/2 entry above: a
-  manifest can genuinely travel over mesh (encoded, fragmented, sent, received, reassembled,
-  decoded), verified against real hardware. **Still not this item itself**: nothing calls
-  `uuids_needed_from`/`export_objects`/`merge_incoming` on a received manifest yet — a
-  manifest arriving over mesh today is decoded and shown, not acted on. The real remaining
-  task is porting `net_sync.rs`'s bidirectional reconciliation loop onto this fragmented,
-  per-port mesh connection instead of a raw TCP socket — scoped, not started.
+- ~~**WSP/1 sync (manifest/diff/merge) over mesh as its own transport**~~ — ✅ **the real
+  remaining task done, 2026-11-22.** Added 2026-09-15, surfaced by planning work on Muster
+  (a new sibling project, a lightweight browser/PWA ops-coordination tool — see its own
+  ROADMAP.md). Real gap, checked directly against [WSP-1.md](WSP-1.md) rather than assumed:
+  WSP/1's actual reconciliation protocol (`export_manifest`/`uuids_needed_from`/
+  `export_objects`/`merge_incoming`) only had two transports, file exchange and authenticated
+  TCP (`net_sync.rs`) — mesh wasn't one of them, and a manifest arriving over mesh was
+  decoded and shown, not acted on. **Closed by extending `wsp2.rs`'s existing content-
+  agnostic fragmenter with two new real content kinds**, `KIND_OBJECTS_REQUEST` (a compact
+  uuid list, same raw-16-bytes-per-uuid shape the manifest's own entries already use) and
+  `KIND_OBJECTS` (a real `WspEnvelope::Objects` — the exact same signed envelope the file and
+  TCP transports already produce — wrapped as an opaque JSON blob rather than a second
+  compact codec, since building one wasn't this item's job; a new `payload_kind()` reads
+  which of the three kinds a reassembled payload is, the port's own equivalent of
+  `handle_mesh_packet`'s portnum dispatch one level up). `mesh.rs` gained three new handlers
+  wired into the existing `PortNum::PrivateApp` branch: `handle_received_manifest` (diffs an
+  arriving manifest against this station's own via `uuids_needed_from`, and if anything's
+  missing, fragments and sends a `KIND_OBJECTS_REQUEST` straight back to whoever sent it),
+  `handle_received_objects_request` (serves one, via the same `export_objects`/
+  `wrap_objects` the file/TCP transports use), and `handle_received_objects` (merges the
+  reply via `sync::unwrap_objects`/`merge_incoming` — identical conflict detection and
+  signature verification to every other transport, not a fourth code path). A `send_fragments`
+  helper, factored out of `sync_manifest_over_mesh` itself, now backs all three sends so
+  there's one real packet-construction path, not four hand-copied ones. **One deliberate,
+  named design difference from `net_sync.rs`, not silently glossed over**: that transport
+  holds one TCP socket open and lock-steps both directions over it in a single function
+  call; mesh has no equivalent long-lived connection to lock-step on (it's an async,
+  broadcast-shaped medium), so this closes the loop per-manifest-received rather than
+  per-connection — full bidirectional convergence between two stations means each station's
+  own operator clicks "Sync Manifest" at some point, same "on-demand, not automatic"
+  operating model `net_sync.rs`'s own module doc already commits to, just per-station
+  instead of per-socket. New `MeshSyncMergeSummary`/`get_mesh_sync_merges` surfaces the real
+  outcome of each pull (inserted/updated/conflicts/signature status) in a new "Sync Merges
+  (WSP/1 over Mesh)" section in `MeshPanel.tsx`, matching the existing "Received Manifests"
+  section's own shape. 7 new Rust tests in `wsp2.rs` (encode/decode round trips for both new
+  kinds, `payload_kind` dispatch, and rejection of a payload decoded as the wrong kind) — 180
+  tests total, 180 passing, 11 live-only skipped (unchanged: the new mesh.rs handlers are
+  `AppHandle`-coupled the same way every other live mesh path in this file already is, so
+  they're exercised through the already-tested pure functions underneath, same honest gap
+  this file's own test module doc already names). Clean TypeScript build.
 
 **Provenance & Trust**
 - ~~**Cleartext HMAC signing**~~ — ✅ done 2026-09-03, see [WSP-1.md](WSP-1.md)'s "Signing" section and that day's changelog entry. Shared-secret-per-known-station model (not a PKI), HMAC-SHA256 over the Objects envelope, verification surfaced (Verified/Unsigned/UnknownSigner/Invalid) but not enforced — the operator decides what to do with an unverified import, same as an unresolved sync conflict. Secret rotation and per-object (rather than per-envelope) signing are real remaining gaps, noted in WSP-1.md rather than silently left out.

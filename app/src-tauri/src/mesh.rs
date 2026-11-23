@@ -85,6 +85,9 @@ pub struct MeshState {
     /// decode works over live mesh, not that the full WSP/1 object-request
     /// follow-up runs automatically).
     pub received_manifests: Mutex<Vec<ReceivedManifestSummary>>,
+    /// A bounded history of completed `KIND_OBJECTS` merges -- see
+    /// `MeshSyncMergeSummary`'s own doc.
+    pub sync_merges: Mutex<Vec<MeshSyncMergeSummary>>,
 }
 
 /// What a peer's reassembled, decoded WSP/2 manifest looks like once
@@ -101,6 +104,22 @@ pub struct ReceivedManifestSummary {
 
 const RECEIVED_MANIFEST_HISTORY_CAP: usize = 20;
 
+/// One completed object-reconciliation pull over mesh -- the real
+/// remaining task `ROADMAP.md`'s "WSP/1 sync (manifest/diff/merge) over
+/// mesh" entry named, now done: this is `sync::merge_incoming`'s own
+/// `MergeReport`, just tagged with who sent it and when, the same
+/// recent-activity-log shape `ReceivedManifestSummary` already uses for
+/// manifests.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MeshSyncMergeSummary {
+    pub peer_node: i64,
+    pub merged_at: i64,
+    pub inserted: usize,
+    pub updated: usize,
+    pub conflicts: usize,
+    pub signature_status: sync::SignatureStatus,
+}
+
 impl MeshState {
     pub fn new() -> Self {
         MeshState {
@@ -110,6 +129,7 @@ impl MeshState {
             reconnect_requested: AtomicBool::new(false),
             manifest_reassembler: Mutex::new(wsp2::Reassembler::new()),
             received_manifests: Mutex::new(Vec::new()),
+            sync_merges: Mutex::new(Vec::new()),
         }
     }
 }
@@ -290,33 +310,16 @@ fn handle_mesh_packet(app: &AppHandle, packet: MeshPacket) {
             match reassembler.add_fragment(&data.payload) {
                 Ok(Some(complete)) => {
                     drop(reassembler);
-                    match wsp2::decode_manifest(&complete) {
-                        Ok((origin_callsign, generated_at, entries)) => {
-                            let summary = ReceivedManifestSummary {
-                                origin_callsign,
-                                generated_at,
-                                entry_count: entries.len(),
-                                received_at: Utc::now().timestamp(),
-                            };
-                            let mut history = mesh_state.received_manifests.lock().expect("mesh state mutex poisoned");
-                            history.push(summary);
-                            // Real, bounded history -- this isn't the
-                            // object store, just a recent-activity log
-                            // for the frontend; see the struct's own doc.
-                            while history.len() > RECEIVED_MANIFEST_HISTORY_CAP {
-                                history.remove(0);
-                            }
-                            drop(history);
-                            let _ = app.emit("mesh-manifest-received", ());
-                        }
-                        Err(e) => {
-                            // A real, honest failure -- a fragment set
-                            // reassembled cleanly but didn't decode as a
-                            // valid WSP/2 manifest (version mismatch,
-                            // corruption, or something else entirely on
-                            // this port). Logged, not silently dropped.
-                            eprintln!("wsp2: failed to decode a reassembled mesh manifest: {e}");
-                        }
+                    // One reassembled byte stream can now be any of three
+                    // real WSP/2 content kinds (see wsp2.rs), not just a
+                    // manifest -- `payload_kind` is this port's equivalent
+                    // of the portnum dispatch just above it.
+                    match wsp2::payload_kind(&complete) {
+                        Ok(wsp2::KIND_MANIFEST) => handle_received_manifest(app, packet.from, &complete),
+                        Ok(wsp2::KIND_OBJECTS_REQUEST) => handle_received_objects_request(app, packet.from, &complete),
+                        Ok(wsp2::KIND_OBJECTS) => handle_received_objects(app, packet.from, &complete),
+                        Ok(other) => eprintln!("wsp2: reassembled mesh payload has an unknown content kind {other}"),
+                        Err(e) => eprintln!("wsp2: failed to read a reassembled mesh payload's kind: {e}"),
                     }
                 }
                 Ok(None) => {
@@ -335,6 +338,198 @@ fn handle_mesh_packet(app: &AppHandle, packet: MeshPacket) {
     }
     // Encrypted packets (channels we don't have the PSK for) are silently
     // dropped for now — no decryption implemented.
+}
+
+/// Sends an already-fragmented WSP/2 payload (manifest, objects request,
+/// or objects reply -- `fragment`'s own output is content-agnostic) to
+/// one specific node. Pulled out of `sync_manifest_over_mesh` so the new
+/// receive-triggered sends below (a request answering a manifest, a
+/// reply answering a request) share the exact same packet-construction
+/// code instead of a third hand-copied loop.
+fn send_fragments(mesh_state: &MeshState, to: u32, frames: &[Vec<u8>]) -> Result<(), String> {
+    let my_node_num = mesh_state.my_node_num.lock().expect("mesh state mutex poisoned").unwrap_or(0);
+    let mut guard = mesh_state.stream.lock().expect("mesh state mutex poisoned");
+    let stream = guard.as_mut().ok_or("not connected to a mesh node")?;
+    for frame in frames {
+        let packet = MeshPacket {
+            from: my_node_num,
+            to,
+            id: generate_config_id(),
+            channel: 0,
+            want_ack: true,
+            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
+                portnum: PortNum::PrivateApp as i32,
+                payload: frame.clone(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let to_radio = ToRadio { payload_variant: Some(to_radio::PayloadVariant::Packet(packet)) };
+        write_to_radio(stream, &to_radio).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// A peer's manifest has fully reassembled and decoded -- records it in
+/// the recent-activity log (unchanged behavior), then does the real
+/// remaining work `ROADMAP.md`'s "WSP/1 sync over mesh" entry named:
+/// diffs it against this station's own manifest and, if anything's
+/// missing here, requests it back from whoever sent it. Deliberately
+/// one direction per manifest received, not a full lockstep exchange
+/// like `net_sync.rs`'s held-open TCP socket -- there's no equivalent
+/// single connection to lock-step on over mesh's async, broadcast-
+/// shaped transport, so full bidirectional convergence between two
+/// stations means each side's own operator triggers
+/// `sync_manifest_over_mesh` at some point, the same "on-demand, not
+/// automatic" operating model `net_sync.rs`'s own module doc already
+/// commits to for its transport. What receiving a manifest does
+/// automatically, same as before: pull whatever this station is
+/// actually missing, without a second click.
+fn handle_received_manifest(app: &AppHandle, from_node: u32, complete: &[u8]) {
+    let (origin_callsign, generated_at, entries) = match wsp2::decode_manifest(complete) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("wsp2: failed to decode a reassembled mesh manifest: {e}");
+            return;
+        }
+    };
+
+    let mesh_state = app.state::<MeshState>();
+    let summary = ReceivedManifestSummary {
+        origin_callsign,
+        generated_at,
+        entry_count: entries.len(),
+        received_at: Utc::now().timestamp(),
+    };
+    {
+        let mut history = mesh_state.received_manifests.lock().expect("mesh state mutex poisoned");
+        history.push(summary);
+        // Real, bounded history -- this isn't the object store, just a
+        // recent-activity log for the frontend; see the struct's own doc.
+        while history.len() > RECEIVED_MANIFEST_HISTORY_CAP {
+            history.remove(0);
+        }
+    }
+    let _ = app.emit("mesh-manifest-received", ());
+
+    let needed = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().expect("db mutex poisoned");
+        let local = sync::export_manifest(&conn);
+        sync::uuids_needed_from(&local, &entries)
+    };
+    if needed.is_empty() {
+        return;
+    }
+
+    let encoded = match wsp2::encode_objects_request(&needed) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("wsp2: failed to encode an objects request: {e}");
+            return;
+        }
+    };
+    let frames = match wsp2::fragment(&encoded, generate_config_id()) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("wsp2: failed to fragment an objects request: {e}");
+            return;
+        }
+    };
+    if let Err(e) = send_fragments(&mesh_state, from_node, &frames) {
+        eprintln!("wsp2: failed to send an objects request back over mesh: {e}");
+    }
+}
+
+/// A peer has asked this station for specific objects by uuid --
+/// the serve side of the pull `handle_received_manifest` just
+/// triggered on whichever station received a manifest. Filters this
+/// station's own manifest down to the requested uuids rather than
+/// trusting the request's uuids directly, so `export_objects` only
+/// ever looks a uuid up under the kind this station itself has it
+/// filed as.
+fn handle_received_objects_request(app: &AppHandle, from_node: u32, complete: &[u8]) {
+    let requested_uuids = match wsp2::decode_objects_request(complete) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("wsp2: failed to decode a reassembled objects request: {e}");
+            return;
+        }
+    };
+
+    let envelope = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().expect("db mutex poisoned");
+        let local = sync::export_manifest(&conn);
+        let entries: Vec<_> = local.into_iter().filter(|e| requested_uuids.contains(&e.uuid)).collect();
+        let objects = sync::export_objects(&conn, &entries);
+        sync::wrap_objects(&conn, objects)
+    };
+
+    let encoded = match wsp2::encode_objects_envelope(&envelope) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("wsp2: failed to encode an objects reply: {e}");
+            return;
+        }
+    };
+    let frames = match wsp2::fragment(&encoded, generate_config_id()) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("wsp2: failed to fragment an objects reply: {e}");
+            return;
+        }
+    };
+    let mesh_state = app.state::<MeshState>();
+    if let Err(e) = send_fragments(&mesh_state, from_node, &frames) {
+        eprintln!("wsp2: failed to send an objects reply back over mesh: {e}");
+    }
+}
+
+/// A peer's answer to this station's own objects request -- the final
+/// step. Merges through the exact same `sync::unwrap_objects`/
+/// `merge_incoming` pair the file and TCP transports already use, so
+/// conflict detection and signature verification behave identically
+/// regardless of how the bytes actually arrived.
+fn handle_received_objects(app: &AppHandle, from_node: u32, complete: &[u8]) {
+    let envelope = match wsp2::decode_objects_envelope(complete) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("wsp2: failed to decode a reassembled objects envelope: {e}");
+            return;
+        }
+    };
+
+    let (report, signature_status) = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().expect("db mutex poisoned");
+        let (objects, signature_status) = match sync::unwrap_objects(&conn, envelope) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("wsp2: received objects envelope failed validation: {e}");
+                return;
+            }
+        };
+        (sync::merge_incoming(&conn, objects), signature_status)
+    };
+
+    let summary = MeshSyncMergeSummary {
+        peer_node: from_node as i64,
+        merged_at: Utc::now().timestamp(),
+        inserted: report.inserted.len(),
+        updated: report.updated.len(),
+        conflicts: report.conflicts.len(),
+        signature_status,
+    };
+    let mesh_state = app.state::<MeshState>();
+    {
+        let mut history = mesh_state.sync_merges.lock().expect("mesh state mutex poisoned");
+        history.push(summary);
+        while history.len() > RECEIVED_MANIFEST_HISTORY_CAP {
+            history.remove(0);
+        }
+    }
+    let _ = app.emit("mesh-sync-merge-completed", ());
 }
 
 fn handle_from_radio(app: &AppHandle, mesh_state: &MeshState, msg: FromRadio) {
@@ -570,17 +765,26 @@ pub fn send_mesh_text(
 /// `net_sync.rs`, the other real sync transport, makes the same choice:
 /// it doesn't use `Transport` either, it's its own direct implementation.
 ///
-/// What this does NOT do yet, named honestly rather than silently
-/// assumed: request the objects the manifest says are needed back from
-/// the peer (`uuids_needed_from`/`export_objects`/`merge_incoming`) --
-/// this proves a manifest can be sent, fragmented, received, reassembled,
-/// and decoded correctly over live mesh; the full bidirectional
-/// reconciliation loop `net_sync.rs` already runs over TCP is a separate,
-/// larger follow-on. Retransmission of a specific missing fragment also
-/// isn't driven automatically here -- `want_ack: true` on every fragment
-/// gets each one the firmware's own real per-packet retry/ack behavior
-/// (see WSP-2.md's "Acknowledgement" section), which is the same
-/// reliability mechanism `send_mesh_text` already relies on today.
+/// **Updated, 2026-11-22: the full reconciliation loop now runs from
+/// here.** Whichever station receives this manifest automatically pulls
+/// whatever it's missing (`handle_received_manifest` -> an objects
+/// request -> `handle_received_objects_request` serves it ->
+/// `handle_received_objects` merges it with `sync::merge_incoming`, the
+/// same function the file and TCP transports already use). This closes
+/// the real, named gap: a manifest arriving over mesh no longer just
+/// sits there decoded and shown. One real, deliberate difference from
+/// `net_sync.rs`'s TCP transport, not silently glossed over: that
+/// transport holds one socket open and lock-steps both directions over
+/// it in a single call; mesh has no equivalent long-lived connection to
+/// lock-step on, so convergence in both directions means each station's
+/// own operator calls this at some point -- same "on-demand, not
+/// automatic" model `net_sync.rs`'s own module doc already commits to,
+/// just per-station instead of per-connection. Retransmission of a
+/// specific missing fragment still isn't driven automatically --
+/// `want_ack: true` on every fragment gets each one the firmware's own
+/// real per-packet retry/ack behavior (see WSP-2.md's "Acknowledgement"
+/// section), the same reliability mechanism `send_mesh_text` already
+/// relies on today.
 #[tauri::command]
 pub fn sync_manifest_over_mesh(mesh_state: State<MeshState>, db: State<Db>, to_node: Option<i64>) -> Result<usize, String> {
     let (callsign, entries) = {
@@ -589,30 +793,10 @@ pub fn sync_manifest_over_mesh(mesh_state: State<MeshState>, db: State<Db>, to_n
     };
     let encoded = wsp2::encode_manifest(callsign.as_deref(), Utc::now().timestamp(), &entries)
         .map_err(|e| format!("failed to encode manifest: {e}"))?;
-    let msg_id = generate_config_id();
-    let frames = wsp2::fragment(&encoded, msg_id).map_err(|e| format!("failed to fragment manifest: {e}"))?;
+    let frames = wsp2::fragment(&encoded, generate_config_id()).map_err(|e| format!("failed to fragment manifest: {e}"))?;
 
     let to = to_node.map(|n| n as u32).unwrap_or(BROADCAST_NODE);
-    let my_node_num = mesh_state.my_node_num.lock().expect("mesh state mutex poisoned").unwrap_or(0);
-    let mut guard = mesh_state.stream.lock().expect("mesh state mutex poisoned");
-    let stream = guard.as_mut().ok_or("not connected to a mesh node")?;
-    for frame in &frames {
-        let packet = MeshPacket {
-            from: my_node_num,
-            to,
-            id: generate_config_id(),
-            channel: 0,
-            want_ack: true,
-            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
-                portnum: PortNum::PrivateApp as i32,
-                payload: frame.clone(),
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
-        let to_radio = ToRadio { payload_variant: Some(to_radio::PayloadVariant::Packet(packet)) };
-        write_to_radio(stream, &to_radio).map_err(|e| e.to_string())?;
-    }
+    send_fragments(&mesh_state, to, &frames)?;
     Ok(frames.len())
 }
 
@@ -622,6 +806,14 @@ pub fn sync_manifest_over_mesh(mesh_state: State<MeshState>, db: State<Db>, to_n
 #[tauri::command]
 pub fn get_received_mesh_manifests(mesh_state: State<MeshState>) -> Vec<ReceivedManifestSummary> {
     mesh_state.received_manifests.lock().expect("mesh state mutex poisoned").clone()
+}
+
+/// The recent-activity log of completed object merges -- the real
+/// outcome of the pull `sync_manifest_over_mesh`'s own doc describes,
+/// surfaced the same way `get_received_mesh_manifests` already is.
+#[tauri::command]
+pub fn get_mesh_sync_merges(mesh_state: State<MeshState>) -> Vec<MeshSyncMergeSummary> {
+    mesh_state.sync_merges.lock().expect("mesh state mutex poisoned").clone()
 }
 
 /// Manifests still mid-transfer -- at least one fragment received, not

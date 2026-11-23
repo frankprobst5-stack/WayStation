@@ -268,6 +268,7 @@ pub fn run() {
             mesh::sync_manifest_over_mesh,
             mesh::get_received_mesh_manifests,
             mesh::get_pending_manifest_fragments,
+            mesh::get_mesh_sync_merges,
             tactical_shorthand::compress_tactical_shorthand,
             tactical_shorthand::expand_tactical_shorthand,
             rig::get_rig_status,
