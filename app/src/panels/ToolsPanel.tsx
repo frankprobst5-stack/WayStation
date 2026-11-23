@@ -23,13 +23,17 @@ import FrequencyConversionPanel from "./FrequencyConversionPanel";
 // all work this way); switching styles page-to-page would be more
 // jarring than useful.
 //
-// "Utilities," "Saved/History," and a Tools-specific "Settings" tab from
-// the mockup don't exist -- no calculation history storage anywhere in
-// the backend, and Station Identity already covers real settings
-// (rig/rotator host, callsign, grid square). Named on the Overview
-// instead of faked.
+// "Saved/History" is real now (2026-11-23): every calculator below has
+// its own Save button (SaveCalcButton.tsx), writing to a single generic
+// calc_history table (db.rs) rather than six different per-calculator
+// schemas -- every one of these tools is fundamentally the same "keep
+// this number" action. A generic "Utilities" catch-all and a
+// Tools-specific "Settings" tab from the mockup still don't exist --
+// Station Identity already covers real settings (rig/rotator host,
+// callsign, grid square), and nothing else in this panel needs its own
+// settings surface.
 
-const TABS = ["Overview", "Radio Control", "Antenna Tools", "RF Calculators", "Frequency Conversions"] as const;
+const TABS = ["Overview", "Radio Control", "Antenna Tools", "RF Calculators", "Frequency Conversions", "History"] as const;
 type Tab = (typeof TABS)[number];
 
 interface RigStatus { enabled: boolean; reachable: boolean }
@@ -109,15 +113,116 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
 
         <div className="sync-section">
           <div className="sync-section-head">
+            <h3>History</h3>
+            <button type="button" className="weather-link-btn" onClick={() => goTo("History")}>
+              Open
+            </button>
+          </div>
+          <div className="alert-card"><div className="alert-area">Every result you've saved from any calculator below.</div></div>
+        </div>
+
+        <div className="sync-section">
+          <div className="sync-section-head">
             <h3>Not built yet</h3>
           </div>
           <div className="bandplan-disclaimer">
-            No calculation-history storage anywhere in the backend, so "Saved/History" and a generic "Utilities"
-            catch-all from the mockup aren't here. A Tools-specific Settings tab isn't either -- real settings
-            (rig/rotator host, callsign, grid square) already live on the Station Identity panel under Settings.
+            A generic "Utilities" catch-all from the mockup isn't here, and neither is a Tools-specific Settings
+            tab -- real settings (rig/rotator host, callsign, grid square) already live on the Station Identity
+            panel under Settings.
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Mirrors db::CalcHistoryEntry.
+interface CalcHistoryEntry {
+  id: number;
+  tool: string;
+  summary: string;
+  created_at: string;
+}
+
+function HistoryTab() {
+  const [entries, setEntries] = useState<CalcHistoryEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setEntries(await invoke<CalcHistoryEntry[]>("get_calc_history"));
+    } catch (err) {
+      console.error("get_calc_history failed:", err);
+      setError(String(err));
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function deleteEntry(id: number) {
+    try {
+      await invoke("delete_calc_history_entry", { id });
+      await refresh();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function clearAll() {
+    if (!confirm("Delete every saved calculation? This can't be undone.")) return;
+    try {
+      await invoke("clear_calc_history");
+      await refresh();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  if (error) {
+    return <div className="panel-alerts panel-alerts-empty">Could not load history: {error}</div>;
+  }
+  if (entries === null) {
+    return <div className="panel-alerts">Loading...</div>;
+  }
+
+  return (
+    <div className="panel-sync">
+      <p className="sync-lede">Every result saved from Antenna Tools, RF Calculators, or Frequency Conversions, most recent first.</p>
+      {entries.length === 0 ? (
+        <div className="panel-alerts-empty">Nothing saved yet — use the Save button under any calculator's result.</div>
+      ) : (
+        <>
+          <button type="button" className="action-btn" onClick={clearAll} style={{ marginBottom: "0.8rem" }}>
+            Clear All
+          </button>
+          <table>
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Result</th>
+                <th>Saved</th>
+                <th style={{ width: "80px" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id}>
+                  <td>{e.tool}</td>
+                  <td>{e.summary}</td>
+                  <td>{new Date(e.created_at).toLocaleString()}</td>
+                  <td>
+                    <button type="button" className="action-btn" onClick={() => deleteEntry(e.id)}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }
@@ -203,6 +308,7 @@ function ToolsPanel() {
           </div>
         )}
         {tab === "Frequency Conversions" && <FrequencyConversionPanel />}
+        {tab === "History" && <HistoryTab />}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import SaveCalcButton from "../components/SaveCalcButton";
 
 // Genuinely missing before this -- confirmed by grep across the whole
 // codebase before writing it. Pure unit math, no backend, same shape as
@@ -26,24 +27,30 @@ function FrequencyConversionPanel() {
       </div>
 
       {valid && hz !== null && wavelengthM !== null ? (
-        <div className="bearing-result">
-          <div className="sw-tile">
-            <span className="sw-label">Hz</span>
-            <span className="sw-value">{formatNumber(hz)}</span>
+        <>
+          <div className="bearing-result">
+            <div className="sw-tile">
+              <span className="sw-label">Hz</span>
+              <span className="sw-value">{formatNumber(hz)}</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">kHz</span>
+              <span className="sw-value">{formatNumber(hz / 1_000)}</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">GHz</span>
+              <span className="sw-value">{formatNumber(hz / 1_000_000_000)}</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">Wavelength</span>
+              <span className="sw-value">{wavelengthM.toFixed(3)} m ({(wavelengthM * 3.28084).toFixed(2)} ft)</span>
+            </div>
           </div>
-          <div className="sw-tile">
-            <span className="sw-label">kHz</span>
-            <span className="sw-value">{formatNumber(hz / 1_000)}</span>
-          </div>
-          <div className="sw-tile">
-            <span className="sw-label">GHz</span>
-            <span className="sw-value">{formatNumber(hz / 1_000_000_000)}</span>
-          </div>
-          <div className="sw-tile">
-            <span className="sw-label">Wavelength</span>
-            <span className="sw-value">{wavelengthM.toFixed(3)} m ({(wavelengthM * 3.28084).toFixed(2)} ft)</span>
-          </div>
-        </div>
+          <SaveCalcButton
+            tool="Frequency Conversion"
+            summary={`${mhz} MHz -> ${formatNumber(hz)} Hz, wavelength ${wavelengthM.toFixed(3)} m (${(wavelengthM * 3.28084).toFixed(2)} ft)`}
+          />
+        </>
       ) : (
         <div className="field-error">Enter a frequency in MHz.</div>
       )}

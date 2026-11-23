@@ -1,4 +1,5 @@
 import { useState } from "react";
+import SaveCalcButton from "../components/SaveCalcButton";
 
 // S = P·G / (4πR²), the FCC OET Bulletin 65 far-field power density formula
 // (confirmed directly against the primary source: transition.fcc.gov/
@@ -36,16 +37,22 @@ function RfSafetyPanel() {
       </div>
 
       {result ? (
-        <div className="bearing-result">
-          <div className="sw-tile">
-            <span className="sw-label">Power Density</span>
-            <span className="sw-value">{result.mwPerCm2.toFixed(4)} mW/cm²</span>
+        <>
+          <div className="bearing-result">
+            <div className="sw-tile">
+              <span className="sw-label">Power Density</span>
+              <span className="sw-value">{result.mwPerCm2.toFixed(4)} mW/cm²</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">&nbsp;</span>
+              <span className="sw-value">{result.wPerM2.toFixed(2)} W/m²</span>
+            </div>
           </div>
-          <div className="sw-tile">
-            <span className="sw-label">&nbsp;</span>
-            <span className="sw-value">{result.wPerM2.toFixed(2)} W/m²</span>
-          </div>
-        </div>
+          <SaveCalcButton
+            tool="RF Safety"
+            summary={`${power}W @ ${gain}dBi, ${distance}m -> ${result.mwPerCm2.toFixed(4)} mW/cm² (${result.wPerM2.toFixed(2)} W/m²)`}
+          />
+        </>
       ) : (
         <div className="field-error">Enter power, gain, and a positive distance.</div>
       )}

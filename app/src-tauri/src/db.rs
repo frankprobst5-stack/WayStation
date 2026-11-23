@@ -3370,6 +3370,80 @@ pub fn get_aircraft_track_history(db: State<Db>) -> Vec<AircraftTrackPoint> {
     get_aircraft_track_history_conn(&conn)
 }
 
+/// One saved calculator result -- ToolsPanel's own "Not built yet" gap,
+/// closed. `tool` and `summary` are both plain strings the calling
+/// calculator builds itself (e.g. `tool: "Antenna"`, `summary: "Dipole @
+/// 146 MHz -> 6' 4.1\" total, 3' 2.1\" per leg"`) -- a single generic
+/// shape rather than six different per-calculator schemas, since every
+/// one of these tools is fundamentally the same "keep this number" action.
+#[derive(Debug, Clone, Serialize)]
+pub struct CalcHistoryEntry {
+    pub id: i64,
+    pub tool: String,
+    pub summary: String,
+    pub created_at: String,
+}
+
+pub fn save_calc_history_conn(conn: &Connection, tool: &str, summary: &str) {
+    conn.execute(
+        "INSERT INTO calc_history (tool, summary, created_at) VALUES (?1, ?2, ?3)",
+        params![tool, summary, chrono::Utc::now().to_rfc3339()],
+    )
+    .expect("failed to insert calc_history");
+}
+
+#[tauri::command]
+pub fn save_calc_history(db: State<Db>, tool: String, summary: String) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    save_calc_history_conn(&conn, &tool, &summary);
+    Ok(())
+}
+
+pub fn get_calc_history_conn(conn: &Connection) -> Vec<CalcHistoryEntry> {
+    let mut stmt = conn
+        .prepare("SELECT id, tool, summary, created_at FROM calc_history ORDER BY id DESC LIMIT 200")
+        .expect("failed to prepare calc_history query");
+    stmt.query_map([], |row| {
+        Ok(CalcHistoryEntry {
+            id: row.get(0)?,
+            tool: row.get(1)?,
+            summary: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })
+    .expect("failed to query calc_history")
+    .filter_map(Result::ok)
+    .collect()
+}
+
+#[tauri::command]
+pub fn get_calc_history(db: State<Db>) -> Vec<CalcHistoryEntry> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_calc_history_conn(&conn)
+}
+
+pub fn delete_calc_history_entry_conn(conn: &Connection, id: i64) {
+    conn.execute("DELETE FROM calc_history WHERE id = ?1", params![id]).expect("failed to delete calc_history entry");
+}
+
+#[tauri::command]
+pub fn delete_calc_history_entry(db: State<Db>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    delete_calc_history_entry_conn(&conn, id);
+    Ok(())
+}
+
+pub fn clear_calc_history_conn(conn: &Connection) {
+    conn.execute("DELETE FROM calc_history", []).expect("failed to clear calc_history");
+}
+
+#[tauri::command]
+pub fn clear_calc_history(db: State<Db>) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    clear_calc_history_conn(&conn);
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ForecastPeriod {
     pub id: i64,
@@ -5087,6 +5161,23 @@ const MIGRATIONS: &[&str] = &[
         heard_at  TEXT NOT NULL
     );
     "#,
+    // v59: calculation history, closing ToolsPanel's own "Not built yet"
+    // gap -- the 6 real calculators (Antenna, Decibel, SWR, RF Safety,
+    // Bearing/Distance, Frequency Conversion) are all live-computed with
+    // no submit step, so a single generic table keyed by which tool
+    // produced it plus a plain-text summary (built client-side, where
+    // each calculator already knows how to describe its own inputs and
+    // result) is the real shape here -- not six different per-tool
+    // schemas for what's fundamentally the same "an operator wanted to
+    // keep this number" action.
+    r#"
+    CREATE TABLE calc_history (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        tool       TEXT NOT NULL,
+        summary    TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -6100,5 +6191,37 @@ mod tests {
         no_position.longitude = None;
         append_aircraft_track_history(&mut conn, &[no_position], 1_000);
         assert!(get_aircraft_track_history_conn(&conn).is_empty(), "no lat/lon means nothing real to plot a trail point from");
+    }
+
+    #[test]
+    fn calc_history_round_trips_and_orders_newest_first() {
+        let conn = fresh_db();
+        save_calc_history_conn(&conn, "Antenna", "Dipole @ 146 MHz -> 6' 4.1\" total");
+        save_calc_history_conn(&conn, "SWR", "1.5:1 -> 4% reflected power");
+        let entries = get_calc_history_conn(&conn);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].tool, "SWR", "most recently saved entry should come first");
+        assert_eq!(entries[1].tool, "Antenna");
+    }
+
+    #[test]
+    fn calc_history_entry_can_be_deleted_individually() {
+        let conn = fresh_db();
+        save_calc_history_conn(&conn, "Antenna", "entry one");
+        save_calc_history_conn(&conn, "Antenna", "entry two");
+        let entries = get_calc_history_conn(&conn);
+        delete_calc_history_entry_conn(&conn, entries[0].id);
+        let remaining = get_calc_history_conn(&conn);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].summary, "entry one");
+    }
+
+    #[test]
+    fn calc_history_can_be_cleared_entirely() {
+        let conn = fresh_db();
+        save_calc_history_conn(&conn, "Antenna", "entry one");
+        save_calc_history_conn(&conn, "SWR", "entry two");
+        clear_calc_history_conn(&conn);
+        assert!(get_calc_history_conn(&conn).is_empty());
     }
 }

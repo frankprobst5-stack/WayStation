@@ -1,4 +1,5 @@
 import { useState } from "react";
+import SaveCalcButton from "../components/SaveCalcButton";
 
 type Mode = "power" | "voltage";
 
@@ -26,10 +27,16 @@ function DecibelCalculatorPanel() {
       </div>
 
       {db !== null ? (
-        <div className="sw-tile">
-          <span className="sw-label">Result</span>
-          <span className="sw-value">{db.toFixed(2)} dB</span>
-        </div>
+        <>
+          <div className="sw-tile">
+            <span className="sw-label">Result</span>
+            <span className="sw-value">{db.toFixed(2)} dB</span>
+          </div>
+          <SaveCalcButton
+            tool="Decibel"
+            summary={`${mode === "power" ? "Power" : "Voltage/field"} ratio ${p1}->${p2} = ${db.toFixed(2)} dB`}
+          />
+        </>
       ) : (
         <div className="field-error">Enter two positive numbers.</div>
       )}

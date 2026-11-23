@@ -1,4 +1,5 @@
 import { useState } from "react";
+import SaveCalcButton from "../components/SaveCalcButton";
 
 type Mode = "power" | "impedance";
 
@@ -72,16 +73,26 @@ function SwrCalculatorPanel() {
       {error ? (
         <div className="field-error">{error}</div>
       ) : (
-        <div className="bearing-result">
-          <div className="sw-tile">
-            <span className="sw-label">VSWR</span>
-            <span className="sw-value">{swr!.toFixed(2)}:1</span>
+        <>
+          <div className="bearing-result">
+            <div className="sw-tile">
+              <span className="sw-label">VSWR</span>
+              <span className="sw-value">{swr!.toFixed(2)}:1</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">Return Loss</span>
+              <span className="sw-value">{returnLossDb!.toFixed(1)} dB</span>
+            </div>
           </div>
-          <div className="sw-tile">
-            <span className="sw-label">Return Loss</span>
-            <span className="sw-value">{returnLossDb!.toFixed(1)} dB</span>
-          </div>
-        </div>
+          <SaveCalcButton
+            tool="SWR"
+            summary={
+              mode === "power"
+                ? `Fwd ${fwd}W / Refl ${refl}W -> ${swr!.toFixed(2)}:1, ${returnLossDb!.toFixed(1)} dB return loss`
+                : `Z0 ${z0}Ω, load ${r}+j${x}Ω -> ${swr!.toFixed(2)}:1, ${returnLossDb!.toFixed(1)} dB return loss`
+            }
+          />
+        </>
       )}
     </div>
   );

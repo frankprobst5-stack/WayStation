@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { gridSquareToLatLon } from "../lib/maidenhead";
 import { distanceKm, initialBearing, compassPoint } from "../lib/greatCircle";
+import SaveCalcButton from "../components/SaveCalcButton";
 
 interface Result {
   distanceKm: number;
@@ -88,20 +89,26 @@ function BearingDistancePanel() {
       {error && <div className="field-error">{error}</div>}
 
       {result && (
-        <div className="bearing-result">
-          <div className="sw-tile">
-            <span className="sw-label">Bearing</span>
-            <span className="sw-value">{result.bearing.toFixed(0)}° {result.compass}</span>
+        <>
+          <div className="bearing-result">
+            <div className="sw-tile">
+              <span className="sw-label">Bearing</span>
+              <span className="sw-value">{result.bearing.toFixed(0)}° {result.compass}</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">Distance</span>
+              <span className="sw-value">{result.distanceKm.toFixed(0)} km</span>
+            </div>
+            <div className="sw-tile">
+              <span className="sw-label">&nbsp;</span>
+              <span className="sw-value">{result.distanceMi.toFixed(0)} mi</span>
+            </div>
           </div>
-          <div className="sw-tile">
-            <span className="sw-label">Distance</span>
-            <span className="sw-value">{result.distanceKm.toFixed(0)} km</span>
-          </div>
-          <div className="sw-tile">
-            <span className="sw-label">&nbsp;</span>
-            <span className="sw-value">{result.distanceMi.toFixed(0)} mi</span>
-          </div>
-        </div>
+          <SaveCalcButton
+            tool="Bearing/Distance"
+            summary={`${stationGrid} -> ${target} = ${result.bearing.toFixed(0)}° ${result.compass}, ${result.distanceKm.toFixed(0)} km (${result.distanceMi.toFixed(0)} mi)`}
+          />
+        </>
       )}
     </div>
   );

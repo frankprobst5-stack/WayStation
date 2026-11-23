@@ -1,4 +1,5 @@
 import { useState } from "react";
+import SaveCalcButton from "../components/SaveCalcButton";
 
 // Standard rule-of-thumb constants (feet, frequency in MHz). Real antennas
 // need trimming/tuning by SWR measurement — these are starting points, not
@@ -25,6 +26,21 @@ function AntennaCalculatorPanel() {
 
   const f = parseFloat(freq);
   const valid = !isNaN(f) && f > 0;
+
+  function summary(): string | null {
+    if (!valid) return null;
+    if (type === "dipole") {
+      const total = 468 / f;
+      return `${ANTENNA_LABELS[type]} @ ${f} MHz -> ${feetToFtIn(total)} total, ${feetToFtIn(total / 2)} per leg`;
+    }
+    if (type === "vertical") {
+      return `${ANTENNA_LABELS[type]} @ ${f} MHz -> ${feetToFtIn(234 / f)} radiator`;
+    }
+    if (type === "quad") {
+      return `${ANTENNA_LABELS[type]} @ ${f} MHz -> ${feetToFtIn(1005 / f)} loop perimeter`;
+    }
+    return `${ANTENNA_LABELS[type]} @ ${f} MHz -> ${feetToFtIn(468 / f)} radiator, ${feetToFtIn(234 / f)} stub`;
+  }
 
   function render() {
     if (!valid) return null;
@@ -96,7 +112,10 @@ function AntennaCalculatorPanel() {
       </div>
 
       {valid ? (
-        <div className="bearing-result">{render()}</div>
+        <>
+          <div className="bearing-result">{render()}</div>
+          <SaveCalcButton tool="Antenna" summary={summary()} />
+        </>
       ) : (
         <div className="field-error">Enter a frequency in MHz.</div>
       )}
