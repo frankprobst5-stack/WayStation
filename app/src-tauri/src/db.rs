@@ -1749,6 +1749,213 @@ pub fn get_sitreps(db: State<Db>, incident_id: String) -> Vec<Sitrep> {
     get_sitreps_conn(&conn, &incident_id)
 }
 
+// --- Tasks (Incident Ops' own "Not built yet" gap, half 1) --------------
+// Deliberately separate from resource_requests: that table answers "what
+// supply do we need," this one answers "who's doing what, by when" --
+// different real questions, same reasoning `aircraft_track_history` was
+// kept separate from `aircraft_tracks` rather than overloaded onto it.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Task {
+    pub id: i64,
+    pub uuid: String,
+    pub incident_id: Option<String>,
+    pub title: String,
+    pub assignee: Option<String>,
+    pub due_at: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+const TASK_STATUSES: [&str; 3] = ["open", "in_progress", "done"];
+
+fn task_from_row(row: &rusqlite::Row) -> rusqlite::Result<Task> {
+    Ok(Task {
+        id: row.get(0)?,
+        uuid: row.get(1)?,
+        incident_id: row.get(2)?,
+        title: row.get(3)?,
+        assignee: row.get(4)?,
+        due_at: row.get(5)?,
+        status: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+const TASK_COLUMNS: &str = "id, uuid, incident_id, title, assignee, due_at, status, created_at, updated_at";
+
+/// `incident_id: None` returns every task regardless of incident (the
+/// "All incidents" default this app's other incident-scoped views
+/// already use on the Tactical Map); `Some(id)` scopes to just that one.
+pub fn get_tasks_conn(conn: &Connection, incident_id: Option<&str>) -> Vec<Task> {
+    let sql = match incident_id {
+        Some(_) => format!("SELECT {TASK_COLUMNS} FROM tasks WHERE incident_id = ?1 ORDER BY (due_at IS NULL), due_at ASC, id ASC"),
+        None => format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY (due_at IS NULL), due_at ASC, id ASC"),
+    };
+    let mut stmt = conn.prepare(&sql).expect("failed to prepare tasks query");
+    let rows = match incident_id {
+        Some(iid) => stmt.query_map(params![iid], task_from_row),
+        None => stmt.query_map([], task_from_row),
+    };
+    rows.expect("failed to query tasks").filter_map(Result::ok).collect()
+}
+
+#[tauri::command]
+pub fn get_tasks(db: State<Db>, incident_id: Option<String>) -> Vec<Task> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_tasks_conn(&conn, incident_id.as_deref())
+}
+
+pub fn create_task_conn(conn: &Connection, incident_id: Option<String>, title: String, assignee: Option<String>, due_at: Option<String>) -> Result<Task, String> {
+    if title.trim().is_empty() {
+        return Err("a task needs a real title".to_string());
+    }
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO tasks (uuid, incident_id, title, assignee, due_at, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'open', ?6, ?6)",
+        params![uuid, incident_id, title, assignee, due_at, now],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    if let Some(iid) = &incident_id {
+        record_incident_event(conn, iid, "task_created", Some("task"), Some(&uuid), &format!("Task created: {title}"));
+    }
+    Ok(Task { id, uuid, incident_id, title, assignee, due_at, status: "open".to_string(), created_at: now.clone(), updated_at: now })
+}
+
+#[tauri::command]
+pub fn create_task(db: State<Db>, incident_id: Option<String>, title: String, assignee: Option<String>, due_at: Option<String>) -> Result<Task, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    create_task_conn(&conn, incident_id, title, assignee, due_at)
+}
+
+pub fn set_task_status_conn(conn: &Connection, uuid: &str, status: &str) -> Result<(), String> {
+    if !TASK_STATUSES.contains(&status) {
+        return Err(format!("unknown task status {status:?} -- must be one of {TASK_STATUSES:?}"));
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = conn
+        .execute("UPDATE tasks SET status = ?1, updated_at = ?2 WHERE uuid = ?3", params![status, now, uuid])
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("no task with uuid {uuid}"));
+    }
+    if let Ok((incident_id, title)) = conn.query_row("SELECT incident_id, title FROM tasks WHERE uuid = ?1", params![uuid], |r| {
+        Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?))
+    }) {
+        if let Some(iid) = incident_id {
+            record_incident_event(conn, &iid, "task_status_changed", Some("task"), Some(uuid), &format!("Task \"{title}\" -> {status}"));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_task_status(db: State<Db>, uuid: String, status: String) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    set_task_status_conn(&conn, &uuid, &status)
+}
+
+pub fn delete_task_conn(conn: &Connection, uuid: &str) {
+    conn.execute("DELETE FROM tasks WHERE uuid = ?1", params![uuid]).expect("failed to delete task");
+}
+
+#[tauri::command]
+pub fn delete_task(db: State<Db>, uuid: String) -> Result<(), String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    delete_task_conn(&conn, &uuid);
+    Ok(())
+}
+
+// --- After Action Reports (Incident Ops' own "Not built yet" gap, half 2)
+// Same real template SITREPs already use (`generate_sitrep_body`'s own
+// personnel/resources/timeline sections), extended with the real task
+// completion breakdown -- a formal closing document, not a live view.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AfterActionReport {
+    pub id: i64,
+    pub uuid: String,
+    pub incident_id: String,
+    pub sequence: i64,
+    pub body: String,
+    pub created_at: String,
+    pub created_by: Option<String>,
+}
+
+fn generate_after_action_report_body(conn: &Connection, incident: &Incident) -> String {
+    let mut body = generate_sitrep_body(conn, incident);
+    body = body.replacen("SITUATION REPORT\n", "AFTER ACTION REPORT\n", 1);
+
+    let tasks = get_tasks_conn(conn, Some(&incident.uuid));
+    let done = tasks.iter().filter(|t| t.status == "done").count();
+    body.push_str(&format!("\n\nTASKS ({done} of {} completed)\n", tasks.len()));
+    if tasks.is_empty() {
+        body.push_str("  None tracked\n");
+    }
+    for t in &tasks {
+        let assignee = t.assignee.as_deref().unwrap_or("unassigned");
+        let due = t.due_at.as_deref().unwrap_or("no due date");
+        body.push_str(&format!("  [{}] {} -- {} -- due {}\n", t.status.to_uppercase(), t.title, assignee, due));
+    }
+    body
+}
+
+fn create_after_action_report_conn(conn: &Connection, incident_id: String, created_by: Option<String>) -> Result<AfterActionReport, String> {
+    let incident = get_incident_by_uuid(conn, &incident_id).ok_or_else(|| format!("no incident with uuid {incident_id}"))?;
+    let sequence: i64 = conn
+        .query_row("SELECT COALESCE(MAX(sequence), 0) + 1 FROM after_action_reports WHERE incident_id = ?1", params![incident_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let body = generate_after_action_report_body(conn, &incident);
+    let now = chrono::Utc::now().to_rfc3339();
+    let uuid = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO after_action_reports (uuid, incident_id, sequence, body, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![uuid, incident_id, sequence, body, now, created_by],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    record_incident_event(conn, &incident_id, "after_action_report_generated", Some("after_action_report"), Some(&uuid), &format!("After Action Report #{sequence} generated"));
+    Ok(AfterActionReport { id, uuid, incident_id, sequence, body, created_at: now, created_by })
+}
+
+#[tauri::command]
+pub fn create_after_action_report(db: State<Db>, incident_id: String, created_by: Option<String>) -> Result<AfterActionReport, String> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    create_after_action_report_conn(&conn, incident_id, created_by)
+}
+
+fn after_action_report_from_row(row: &rusqlite::Row) -> rusqlite::Result<AfterActionReport> {
+    Ok(AfterActionReport {
+        id: row.get(0)?,
+        uuid: row.get(1)?,
+        incident_id: row.get(2)?,
+        sequence: row.get(3)?,
+        body: row.get(4)?,
+        created_at: row.get(5)?,
+        created_by: row.get(6)?,
+    })
+}
+
+fn get_after_action_reports_conn(conn: &Connection, incident_id: &str) -> Vec<AfterActionReport> {
+    let mut stmt = conn
+        .prepare("SELECT id, uuid, incident_id, sequence, body, created_at, created_by FROM after_action_reports WHERE incident_id = ?1 ORDER BY sequence ASC")
+        .expect("failed to prepare after_action_reports query");
+    stmt.query_map(params![incident_id], after_action_report_from_row)
+        .expect("failed to query after_action_reports")
+        .filter_map(Result::ok)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_after_action_reports(db: State<Db>, incident_id: String) -> Vec<AfterActionReport> {
+    let conn = db.0.lock().expect("db mutex poisoned");
+    get_after_action_reports_conn(&conn, &incident_id)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Alert {
     pub id: String,
@@ -5387,6 +5594,37 @@ const MIGRATIONS: &[&str] = &[
         added_at   TEXT NOT NULL
     );
     "#,
+    // v62: Tasks + After Action Reports, closing Incident Ops' own "Not
+    // built yet" gap -- a standalone tracker (assign/due/status, separate
+    // from resource_requests, which answers "what supply do we need," not
+    // "who's doing what by when") and a formal closing document built from
+    // the same real incident data SITREPs already draw from
+    // (generate_sitrep_body's own real template), now also including the
+    // real task completion breakdown. `incident_id` on tasks is nullable
+    // -- a task doesn't have to belong to a declared incident (a real,
+    // ordinary to-do still needs tracking even with nothing declared yet).
+    r#"
+    CREATE TABLE tasks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid        TEXT NOT NULL UNIQUE,
+        incident_id TEXT,
+        title       TEXT NOT NULL,
+        assignee    TEXT,
+        due_at      TEXT,
+        status      TEXT NOT NULL DEFAULT 'open',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+    CREATE TABLE after_action_reports (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid        TEXT NOT NULL UNIQUE,
+        incident_id TEXT NOT NULL,
+        sequence    INTEGER NOT NULL,
+        body        TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        created_by  TEXT
+    );
+    "#,
 ];
 
 /// `WAYSTATION_DATA_DIR` override exists specifically so two WayStation
@@ -6492,5 +6730,105 @@ mod tests {
         .unwrap();
         assert_eq!(recent_sighting_count_conn(&conn, "a1b2c3", 10), 1);
         assert_eq!(recent_sighting_count_conn(&conn, "a1b2c3", 30), 2);
+    }
+
+    #[test]
+    fn create_task_rejects_an_empty_title() {
+        let conn = fresh_db();
+        let err = create_task_conn(&conn, None, "   ".to_string(), None, None).unwrap_err();
+        assert!(err.contains("real title"));
+    }
+
+    #[test]
+    fn create_task_without_an_incident_works_and_logs_nothing() {
+        let conn = fresh_db();
+        let task = create_task_conn(&conn, None, "Refill fuel cans".to_string(), Some("K7WSP".to_string()), None).unwrap();
+        assert_eq!(task.status, "open");
+        assert_eq!(task.incident_id, None);
+        let tasks = get_tasks_conn(&conn, None);
+        assert_eq!(tasks.len(), 1);
+    }
+
+    #[test]
+    fn create_task_with_an_incident_logs_a_real_timeline_event() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        create_task_conn(&conn, Some(incident.uuid.clone()), "Check in Team Alpha".to_string(), None, None).unwrap();
+        let events = get_incident_events_conn(&conn, &incident.uuid);
+        assert!(events.iter().any(|e| e.event_type == "task_created"));
+    }
+
+    #[test]
+    fn get_tasks_conn_filters_by_incident_when_asked() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        create_task_conn(&conn, Some(incident.uuid.clone()), "In-incident task".to_string(), None, None).unwrap();
+        create_task_conn(&conn, None, "General task".to_string(), None, None).unwrap();
+        assert_eq!(get_tasks_conn(&conn, None).len(), 2, "no filter should return every task");
+        assert_eq!(get_tasks_conn(&conn, Some(&incident.uuid)).len(), 1, "a real incident filter should scope to just that one");
+    }
+
+    #[test]
+    fn set_task_status_rejects_an_unknown_status() {
+        let conn = fresh_db();
+        let task = create_task_conn(&conn, None, "A task".to_string(), None, None).unwrap();
+        let err = set_task_status_conn(&conn, &task.uuid, "cancelled").unwrap_err();
+        assert!(err.contains("unknown task status"));
+    }
+
+    #[test]
+    fn set_task_status_rejects_an_unknown_uuid() {
+        let conn = fresh_db();
+        let err = set_task_status_conn(&conn, "not-a-real-uuid", "done").unwrap_err();
+        assert!(err.contains("no task with uuid"));
+    }
+
+    #[test]
+    fn set_task_status_to_done_actually_persists() {
+        let conn = fresh_db();
+        let task = create_task_conn(&conn, None, "A task".to_string(), None, None).unwrap();
+        set_task_status_conn(&conn, &task.uuid, "done").unwrap();
+        let tasks = get_tasks_conn(&conn, None);
+        assert_eq!(tasks[0].status, "done");
+    }
+
+    #[test]
+    fn delete_task_conn_removes_it() {
+        let conn = fresh_db();
+        let task = create_task_conn(&conn, None, "A task".to_string(), None, None).unwrap();
+        delete_task_conn(&conn, &task.uuid);
+        assert!(get_tasks_conn(&conn, None).is_empty());
+    }
+
+    #[test]
+    fn after_action_report_includes_the_real_task_completion_breakdown() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        let t1 = create_task_conn(&conn, Some(incident.uuid.clone()), "Deploy shelter".to_string(), Some("KJ4ESQ".to_string()), None).unwrap();
+        create_task_conn(&conn, Some(incident.uuid.clone()), "Restock medical".to_string(), None, None).unwrap();
+        set_task_status_conn(&conn, &t1.uuid, "done").unwrap();
+
+        let report = create_after_action_report_conn(&conn, incident.uuid.clone(), Some("KJ4ESQ".to_string())).unwrap();
+        assert!(report.body.starts_with("AFTER ACTION REPORT"));
+        assert!(report.body.contains("TASKS (1 of 2 completed)"));
+        assert!(report.body.contains("Deploy shelter"));
+        assert!(report.body.contains("DONE"));
+    }
+
+    #[test]
+    fn after_action_report_sequence_increments_per_incident() {
+        let conn = fresh_db();
+        let incident = create_incident_conn(&conn, "Test Incident".to_string(), None);
+        let first = create_after_action_report_conn(&conn, incident.uuid.clone(), None).unwrap();
+        let second = create_after_action_report_conn(&conn, incident.uuid.clone(), None).unwrap();
+        assert_eq!(first.sequence, 1);
+        assert_eq!(second.sequence, 2);
+    }
+
+    #[test]
+    fn after_action_report_rejects_an_unknown_incident() {
+        let conn = fresh_db();
+        let err = create_after_action_report_conn(&conn, "not-a-real-incident".to_string(), None).unwrap_err();
+        assert!(err.contains("no incident with uuid"));
     }
 }

@@ -71,6 +71,93 @@ function IncidentTimeline({ incidentUuid }: { incidentUuid: string }) {
   );
 }
 
+// Mirrors db::AfterActionReport.
+interface AfterActionReport {
+  id: number;
+  uuid: string;
+  incident_id: string;
+  sequence: number;
+  body: string;
+  created_at: string;
+  created_by: string | null;
+}
+
+function IncidentAfterActionReports({ incidentUuid }: { incidentUuid: string }) {
+  const [reports, setReports] = useState<AfterActionReport[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setReports(await invoke<AfterActionReport[]>("get_after_action_reports", { incidentId: incidentUuid }));
+    } catch (err) {
+      console.error("get_after_action_reports failed:", err);
+      setReportError(String(err));
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, [incidentUuid]);
+
+  async function generate() {
+    setGenerating(true);
+    try {
+      await invoke("create_after_action_report", { incidentId: incidentUuid, createdBy: null });
+      setReportError(null);
+      await refresh();
+    } catch (err) {
+      console.error("create_after_action_report failed:", err);
+      setReportError(String(err));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function copyBody(report: AfterActionReport) {
+    await navigator.clipboard.writeText(report.body);
+    setCopiedId(report.id);
+    setTimeout(() => setCopiedId(null), 1500);
+  }
+
+  return (
+    <div className="incident-sitreps">
+      <div className="incident-sitreps-head">
+        <span>
+          {reports.length === 0 ? "No After Action Reports generated yet." : `${reports.length} report${reports.length === 1 ? "" : "s"} generated.`}
+        </span>
+        <button type="button" onClick={generate} disabled={generating}>
+          {generating ? "Generating…" : "Generate After Action Report"}
+        </button>
+      </div>
+      <div className="field-hint">
+        Builds on the same real snapshot a SITREP captures (personnel, resources, timeline), plus a task
+        completion breakdown as of right now. Generate this once the incident is closed and tasks are settled --
+        each generation is permanent, numbered, and never edited afterward.
+      </div>
+      {reportError && <div className="panel-alerts-empty">{reportError}</div>}
+      {reports.map((report) => (
+        <div key={report.id} className="incident-sitrep-row">
+          <div className="incident-sitrep-row-head">
+            <span className="incident-sitrep-label">
+              AAR #{report.sequence} — {new Date(report.created_at).toLocaleString()}
+            </span>
+            <button type="button" onClick={() => setOpenId((current) => (current === report.id ? null : report.id))}>
+              {openId === report.id ? "Hide" : "View"}
+            </button>
+            <button type="button" onClick={() => copyBody(report)}>
+              {copiedId === report.id ? "Copied" : "Copy"}
+            </button>
+          </div>
+          {openId === report.id && <pre className="incident-sitrep-body">{report.body}</pre>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 type NarrativeState = { status: "loading"; text?: undefined; error?: undefined } | { status: "done"; text: string; error?: undefined } | { status: "error"; error: string; text?: undefined };
 
 function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
@@ -178,7 +265,7 @@ function IncidentSitreps({ incidentUuid }: { incidentUuid: string }) {
   );
 }
 
-type ExpandedSection = "timeline" | "sitreps" | null;
+type ExpandedSection = "timeline" | "sitreps" | "aar" | null;
 
 function IncidentsPanel() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -266,6 +353,9 @@ function IncidentsPanel() {
           <button type="button" onClick={() => toggle(incident.uuid, "sitreps")}>
             {isThis && expanded.section === "sitreps" ? "Hide SITREPs" : "SITREPs"}
           </button>
+          <button type="button" onClick={() => toggle(incident.uuid, "aar")}>
+            {isThis && expanded.section === "aar" ? "Hide AAR" : "After Action Report"}
+          </button>
           {incident.status === "active" && (
             <button type="button" onClick={() => closeIncident(incident.id)} disabled={closingId === incident.id}>
               {closingId === incident.id ? "Closing…" : "Close"}
@@ -274,6 +364,7 @@ function IncidentsPanel() {
         </div>
         {isThis && expanded.section === "timeline" && <IncidentTimeline incidentUuid={incident.uuid} />}
         {isThis && expanded.section === "sitreps" && <IncidentSitreps incidentUuid={incident.uuid} />}
+        {isThis && expanded.section === "aar" && <IncidentAfterActionReports incidentUuid={incident.uuid} />}
       </div>
     );
   }
