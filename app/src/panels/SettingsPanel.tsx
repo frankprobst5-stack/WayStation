@@ -7,6 +7,7 @@ import RequiredSoftwarePanel from "./RequiredSoftwarePanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
 import SyncPanel from "./SyncPanel";
 import AboutPanel from "./AboutPanel";
+import DataStoragePanel from "./DataStoragePanel";
 
 // Consolidates six panels that used to each show up as their own separate
 // stacked tile under the "settings" category into one tabbed page,
@@ -20,16 +21,18 @@ import AboutPanel from "./AboutPanel";
 // server, local weather station, Citadel Kiwix, Direwolf audio device) all
 // save together as one profile -- restructuring that into per-item tabs
 // would mean rebuilding the form itself, not just moving components, so it
-// stays one "Station" tab. What IS real now (2026-09-25, WayStation's own
-// modularization work starting for real): a genuine "Modules" tab with
-// per-item Enabled toggles for the local-hardware integrations that have
-// one (Mesh, Rig, Rotator so far) -- see ModulesPanel.tsx and the Citadel
-// Ecosystem ARCHITECTURE.md's "Module conventions" section. It's additive,
-// not a replacement: Station's own rig_enabled/rotator_enabled checkboxes
-// still work exactly as before, both surfaces write the same columns.
-// Likewise, no separate "Data & Storage" usage panel exists.
+// stays one "Station" tab. What IS real now: a genuine "Modules" tab with
+// per-item Enabled toggles for every module that has one -- Mesh, Rig,
+// Rotator, Winlink, JS8Call, Packet (APRS/Direwolf), and ATAK/CoT, all
+// seven as of 2026-11-22 -- see ModulesPanel.tsx and the Citadel Ecosystem
+// ARCHITECTURE.md's "Module conventions" section. It's additive, not a
+// replacement: Station's own rig_enabled/rotator_enabled checkboxes still
+// work exactly as before, both surfaces write the same columns. A real
+// "Data & Storage" usage tab exists too (added 2026-11-22, DataStoragePanel.tsx) --
+// the Station/Connections/Integrations split above remains the one real,
+// deliberately-not-built-yet gap in this list.
 
-const TABS = ["Overview", "Station", "Modules", "Appearance", "Required Software", "Diagnostics", "Sync", "About"] as const;
+const TABS = ["Overview", "Station", "Modules", "Appearance", "Data & Storage", "Required Software", "Diagnostics", "Sync", "About"] as const;
 type Tab = (typeof TABS)[number];
 
 interface StationProfile { callsign: string | null; grid_square: string | null }
@@ -37,6 +40,19 @@ interface SoftwareEntry { detected: boolean }
 interface SourceHealth { status: string }
 interface ConnectivitySnapshot { sources: SourceHealth[] }
 interface TrustedPeer { id: number }
+interface StorageUsageSummary { db_file_bytes: number; pat_dir_bytes: number; other_files: { bytes: number }[] }
+
+function formatBytesShort(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value.toFixed(1)} ${units[i]}`;
+}
 
 function useInvoke<T>(command: string) {
   const [data, setData] = useState<T | null>(null);
@@ -72,8 +88,10 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
   const software = useInvoke<SoftwareEntry[]>("get_required_software");
   const connectivity = useInvoke<ConnectivitySnapshot>("get_connectivity_state");
   const peers = useInvoke<TrustedPeer[]>("get_trusted_peers");
+  const storage = useInvoke<StorageUsageSummary>("get_storage_usage");
 
   const missingSoftware = software?.filter((s) => !s.detected).length ?? 0;
+  const totalStorageBytes = storage ? storage.db_file_bytes + storage.pat_dir_bytes + storage.other_files.reduce((sum, f) => sum + f.bytes, 0) : 0;
   const problemSources = connectivity?.sources.filter((s) => s.status !== "healthy").length ?? 0;
 
   return (
@@ -92,6 +110,12 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
 
       <SummaryCard title="Appearance" onView={() => goTo("Appearance")}>
         <div className="alert-card"><div className="alert-area">Theme, including a real red night-vision mode.</div></div>
+      </SummaryCard>
+
+      <SummaryCard title="Data & Storage" onView={() => goTo("Data & Storage")}>
+        <div className="alert-card">
+          <div className="alert-area">{storage === null ? "Loading..." : `${formatBytesShort(totalStorageBytes)} used${storage.other_files.length > 0 ? ` (${storage.other_files.length} stray file${storage.other_files.length === 1 ? "" : "s"})` : ""}`}</div>
+        </div>
       </SummaryCard>
 
       <SummaryCard title="Required Software" onView={() => goTo("Required Software")}>
@@ -117,11 +141,11 @@ function OverviewTab({ goTo }: { goTo: (t: Tab) => void }) {
           <h3>Not built yet</h3>
         </div>
         <div className="bandplan-disclaimer">
-          The mockup's per-item Enabled toggles are real now for Mesh/Rig/Rotator — see the new Modules tab above.
-          Winlink/JS8Call/Packet don't have one yet (each manages a real subprocess, not just a poller — see
-          Modules' own note). The Station tab itself is still one combined form rather than split into
-          Station/Connections/Integrations, since that would mean restructuring the form, not just moving it. A
-          separate "Data & Storage" usage panel doesn't exist either.
+          The mockup's per-item Enabled toggles are real now for every module that has one — Mesh, Rig, Rotator,
+          Winlink, JS8Call, Packet (APRS/Direwolf), and ATAK/CoT — see the Modules tab above. A real Data & Storage
+          tab exists too. The one real remaining gap: the Station tab is still one combined form rather than split
+          into Station/Connections/Integrations, since that would mean restructuring the form itself, not just
+          moving components around.
         </div>
       </div>
     </div>
@@ -148,6 +172,7 @@ function SettingsPanel() {
         {tab === "Station" && <StationIdentityPanel />}
         {tab === "Modules" && <ModulesPanel />}
         {tab === "Appearance" && <AppearancePanel />}
+        {tab === "Data & Storage" && <DataStoragePanel />}
         {tab === "Required Software" && <RequiredSoftwarePanel />}
         {tab === "Diagnostics" && <DiagnosticsPanel />}
         {tab === "Sync" && <SyncPanel />}

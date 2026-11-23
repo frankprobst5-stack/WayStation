@@ -304,6 +304,8 @@ pub fn run() {
             repeaterbook::search_repeaters,
             required_software::get_required_software,
             backup::backup_database,
+            backup::get_storage_usage,
+            backup::delete_storage_file,
             qr_transport::generate_qr_card,
             qr_transport::import_qr_image,
             qr_transport::get_qr_import_progress,
